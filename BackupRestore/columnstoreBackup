@@ -315,6 +315,14 @@ if [ $singleServerInstall == "n" ]; then
         pmModuleDBRootCount[$moduleID]=$(xmllint --xpath "string(//ModuleDBRootCount$moduleID-3)" $BACKUP_SERVER_LOCATION/Columnstore.xml)     
     done
     
+    if [ $serverTypeInstall == "2" ]; then
+        umModuleCount=$pmModuleCount
+        for (( moduleID=1; moduleID<=$umModuleCount; moduleID++ ))
+        do
+            umModuleIP[$moduleID]=${pmModuleIP[$moduleID]}
+            umModuleHostname[$moduleID]=${pmModuleHostname[$moduleID]}     
+        done
+    fi
     if [ "$detectError" = true ]; then
         echo "Check that ssh and passwordless login are available." >&2
         exit 255 

@@ -257,7 +257,16 @@ if [ $restore_singleServerInstall == "n" ]; then
         
         restore_pmModuleDBRootCount[$moduleID]=$(xmllint --xpath "string(//ModuleDBRootCount$moduleID-3)" $restoreServerConfigeDir/Columnstore.xml)      
     done
-    
+
+    if [ $restore_serverTypeInstall == "2" ]; then
+        restore_umModuleCount=$restore_pmModuleCount
+        for (( moduleID=1; moduleID<=$restore_umModuleCount; moduleID++ ))
+        do
+            restore_umModuleIP[$moduleID]=${restore_pmModuleIP[$moduleID]}
+            restore_umModuleHostname[$moduleID]=${restore_pmModuleHostname[$moduleID]}     
+        done
+    fi
+        
     if [ "$detectError" = true ]; then
         echo "Check that ssh and passwordless login are available." >&2
         exit 255 
@@ -291,43 +300,9 @@ backup_umModuleCount=$(xmllint --xpath "string(//ModuleCount2)" $BACKUP_SERVER_L
 backup_pmModuleCount=$(xmllint --xpath "string(//ModuleCount3)" $BACKUP_SERVER_LOCATION/Columnstore.xml)
 backup_DBRootCount=$(xmllint --xpath 'string(//DBRootCount)' $BACKUP_SERVER_LOCATION/Columnstore.xml)
 
-for (( moduleID=1; moduleID<=$backup_umModuleCount; moduleID++ ))
-do
-    umModuleIP1=$(xmllint --xpath "string(//ModuleIPAddr$moduleID-1-2)" $restoreServerConfigeDir/Columnstore.xml)
-    umModuleIP2=$(xmllint --xpath "string(//ModuleIPAddr$moduleID-2-2)" $restoreServerConfigeDir/Columnstore.xml)
-
-    if [ $restore_umModuleIP[$moduleID] != $umModuleIP1 || $restore_umModuleIP[$moduleID] != $umModuleIP2 ]; then
-        echo "ERROR: Restore and Backup IP addresses differ at UM$moduleID" >&2
-        echo "(Restore  IP  = $restore_umModuleIP[$moduleID])" >&2
-        echo "(Backup   IP1 = $umModuleIP1)" >&2
-        echo "(Backup   IP2 = $umModuleIP2)" >&2
-        detectError=true
-    fi
-done
-           
-for (( moduleID=1; moduleID<=$backup_pmModuleCount; moduleID++ ))
-do
-
-    pmModuleIP1=$(xmllint --xpath "string(//ModuleIPAddr$moduleID-1-3)" $BACKUP_SERVER_LOCATION/Columnstore.xml)
-    pmModuleIP2=$(xmllint --xpath "string(//ModuleIPAddr$moduleID-2-3)" $BACKUP_SERVER_LOCATION/Columnstore.xml)
-
-    if [ $restore_pmModuleIP[$moduleID] != $pmModuleIP1 || $restore_pmModuleIP[$moduleID] != $pmModuleIP2 ]; then
-        echo "ERROR: Restore and Backup IP addresses differ at PM$moduleID" >&2
-        echo "(Restore  IP  = $restore_pmModuleIP[$moduleID])" >&2
-        echo "(Backup   IP1 = $pmModuleIP1)" >&2
-        echo "(Backup   IP2 = $pmModuleIP2)" >&2
-        detectError=true
-    fi
-
-    backup_pmModuleDBRootCount[$moduleID]=$(xmllint --xpath "string(//ModuleDBRootCount$moduleID-3)" $BACKUP_SERVER_LOCATION/Columnstore.xml)       
-done
-
-###############################################################################
-# Verify PM UM and dbroot config
-###############################################################################
 errorDetected=false
 if [ $backup_singleServerInstall != $restore_singleServerInstall ]; then
-    echo "ERROR: SINGLE and MULTI server intsallations detected:" >&2
+    echo "ERROR: SINGLE and MULTI server installations detected:" >&2
     echo "Restore SingleServerInstall: $restore_singleServerInstall" >&2
     echo "Backup  SingleServerInstall: $backup_singleServerInstall" >&2
     errorDetected=true
@@ -341,7 +316,50 @@ elif [ $backup_PMwithUM != $restore_PMwithUM ]; then
     echo "Restore PMwithUM: $restore_PMwithUM" >&2
     echo "Backup  PMwithUM: $backup_PMwithUM" >&2
     errorDetected=true
-elif [ $backup_umModuleCount != $restore_umModuleCount ]; then
+fi
+if [ "$errorDetected" = true ]; then
+    exit 3
+fi
+
+for (( moduleID=1; moduleID<=$backup_umModuleCount; moduleID++ ))
+do
+    umModuleIP1=$(xmllint --xpath "string(//ModuleIPAddr$moduleID-1-2)" $restoreServerConfigeDir/Columnstore.xml)
+    umModuleIP2=$(xmllint --xpath "string(//ModuleIPAddr$moduleID-2-2)" $restoreServerConfigeDir/Columnstore.xml)
+
+    if [ ${restore_umModuleIP[$moduleID]} != $umModuleIP1 ] && [ ${restore_umModuleIP[$moduleID]} != $umModuleIP2 ]; then
+        echo "ERROR: Restore and Backup IP addresses differ at UM$moduleID" >&2
+        echo "(Restore  IP  = $restore_umModuleIP[$moduleID])" >&2
+        echo "(Backup   IP1 = $umModuleIP1)" >&2
+        echo "(Backup   IP2 = $umModuleIP2)" >&2
+        detectError=true
+    fi
+done
+
+for (( moduleID=1; moduleID<=$backup_pmModuleCount; moduleID++ ))
+do
+
+    pmModuleIP1=$(xmllint --xpath "string(//ModuleIPAddr$moduleID-1-3)" $BACKUP_SERVER_LOCATION/Columnstore.xml)
+    pmModuleIP2=$(xmllint --xpath "string(//ModuleIPAddr$moduleID-2-3)" $BACKUP_SERVER_LOCATION/Columnstore.xml)
+
+    if [ ${restore_pmModuleIP[$moduleID]} != $pmModuleIP1 ] && [ ${restore_pmModuleIP[$moduleID]} != $pmModuleIP2 ]; then
+        echo "ERROR: Restore and Backup IP addresses differ at PM$moduleID" >&2
+        echo "(Restore  IP  = $restore_pmModuleIP[$moduleID])" >&2
+        echo "(Backup   IP1 = $pmModuleIP1)" >&2
+        echo "(Backup   IP2 = $pmModuleIP2)" >&2
+        errorDetected=true
+    fi
+
+    backup_pmModuleDBRootCount[$moduleID]=$(xmllint --xpath "string(//ModuleDBRootCount$moduleID-3)" $BACKUP_SERVER_LOCATION/Columnstore.xml)       
+done
+
+if [ $backup_serverTypeInstall == "2" ]; then
+    backup_umModuleCount=$backup_pmModuleCount
+fi
+###############################################################################
+# Verify PM UM and dbroot config
+###############################################################################
+errorDetected=false
+if [ $backup_umModuleCount != $restore_umModuleCount ]; then
     echo "ERROR: UM Module Count difference detected:" >&2
     echo "Restore UM Count: $restore_umModuleCount" >&2
     echo "Backup  UM Count: $backup_umModuleCount" >&2
