@@ -1,0 +1,774 @@
+#!/bin/bash
+
+VERBOSE=false
+QUIET=false
+COMPRESS=false
+INNODB_BACKUP=false
+INSTALL_DIR=/usr/local/mariadb/columnstore
+LOGICAL=false
+RAW=false
+PM1=none
+BACKUP_SERVER_LOCATION=none
+PASSWORD=""
+DRY_RUN=false
+USER=root
+
+###############################################################################
+#Uncomment following lines and replace list of databases to exclude 
+#The list should follow format of example below in DATABASES_TO_EXCLUDE
+###############################################################################
+EXCLUSION_LIST="'information_schema','calpontsys','columnstore_info','infinidb_querystats','infinidb_vtable','performance_schema','mysql'"
+#DATABASES_TO_EXCLUDE="db1 db2 db3"
+#for DB in `echo "${DATABASES_TO_EXCLUDE}"`
+#do
+#    EXCLUSION_LIST="${EXCLUSION_LIST},'${DB}'"
+#done
+
+
+###
+# Print Fucntions
+###
+
+helpPrint () {
+          ################################################################################
+    echo ""
+    echo "MariaDB ColumnStore Automated Backup Tool"
+    echo ""
+    echo "This tool is meant to automate the ColumnStore backup procedure documented at:"
+    echo ""
+    echo "https://mariadb.com/kb/en/mariadb/columnstore-backup-and-recovery/"
+    echo ""
+    echo "The tool is designed to be run on the system storing the backups. It requires"
+    echo "the backup system to have passwordless login enabled for the account that"
+    echo "MariaDB ColumnStore was installed and maintained. (Assumes root by default)"
+    echo ""
+    echo "This tool must be run as root or with sudo."
+    echo ""
+    echo "The default behavior is to run mysqldump for logical schema backups and rsync"
+    echo "for data(n) directories of columnstore data. Other options are available."
+    echo "Default EXCLUDED databases from backup:"
+    echo "'information_schema','calpontsys','columnstore_info','infinidb_querystats'"
+    echo "'infinidb_vtable','performance_schema','mysql'"
+    echo ""
+    echo "Usage: $0 [options] pm1 backupServerLocation"
+    echo ""
+    echo "pm1                       IP address of ColumnStore server"
+    echo "                              (PM1 if Multi-Node install)"
+    echo "backupServerLocation      Path to the directory for storing backup files."
+    echo ""    
+    echo "OPTIONS:"
+    echo "-h,--help         Print this message and exit."
+    echo "-v,--verbose      Print more verbose execution details." 
+    echo "-d,--dry-run      Dry run and executes rsync dry run with stats." 
+    echo "-z,--compress     Utilize the compression option for rsync."
+    echo "-i,--innodb       Perform a cold backup of the InnoDB Tables present."
+    echo "                      Excluding those listed in excluded databases above."
+    echo "-l,--logical      Only execute the Mysqldump command with no data files copied."
+    echo "-r,--raw          Perform raw backup of both um and pm database files."
+    echo "--user=[user]     Change the user performing remote sessions. (Default: root)"
+    echo ""
+    echo "--install-dir=[PATH]  Change the install directory of ColumnStore."
+    echo "                          Default: /usr/local/mariadb/columnstore"
+    echo ""
+}
+
+verbosePrint () {
+
+    if [ "$VERBOSE" = true ]; then
+        echo $1 
+    fi
+
+}
+
+
+
+# Parse command line options.
+while getopts hdzilrqvu:-: OPT; do
+    case "$OPT" in
+        h)
+            echo $USAGE
+            helpPrint
+            exit 0
+            ;;
+        d)
+            DRY_RUN=true
+            ;;
+        z)
+            COMPRESS=true
+            ;;
+        i)
+            INNODB_BACKUP=true
+            ;;
+        l)
+            LOGICAL=true
+            ;;
+        r)
+            RAW=true
+            ;;      
+        v)
+            VERBOSE=true
+            ;;            
+        -)  LONG_OPTARG="${OPTARG#*=}"
+            ## Parsing hack for the long style of arguments.
+            case $OPTARG in
+                help )  
+                    helpPrint
+                    exit 0
+                    ;;            
+                compress )  
+                    COMPRESS=true 
+                    ;;
+                dry-run )
+                    DRY_RUN=true
+                    ;;
+                innodb )
+                    INNODB_BACKUP=true
+                    ;;
+                logical)
+                    LOGICAL=true
+                    ;;
+                raw)
+                    RAW=true
+                    ;;      
+                verbose)
+                    VERBOSE=true
+                    ;;                    
+                install-dir=?* )  
+                    INSTALL_DIR="$LONG_OPTARG" 
+                    ;;
+                user=?* )  
+                    USER="$LONG_OPTARG" 
+                    ;;                    
+                install-dir* )  
+                    echo "No arg for --$OPTARG option" >&2
+                    exit 1
+                    ;;
+                user* )  
+                    echo "No arg for --$OPTARG option" >&2
+                    exit 1
+                    ;;
+                help* )  
+                    helpPrint
+                    exit 0
+                    ;;                                        
+                compress* )
+                    echo "No arg allowed for --$OPTARG option" >&2
+                    exit 1 
+                    ;;
+                dry-run* )
+                    echo "No arg allowed for --$OPTARG option" >&2
+                    exit 1
+                    ;;
+                innodb* )
+                    echo "No arg allowed for --$OPTARG option" >&2
+                    exit 1
+                    ;;
+                logical* )
+                    echo "No arg allowed for --$OPTARG option" >&2
+                    exit 1
+                    ;;
+                raw* )
+                    echo "No arg allowed for --$OPTARG option" >&2
+                    exit 1
+                    ;;      
+                verbose* )
+                    echo "No arg allowed for --$OPTARG option" >&2
+                    exit 1
+                    ;;                    
+                '' )
+                    break ;; # "--" terminates argument processing
+                * )
+                    echo "Illegal option --$OPTARG" >&2
+                    exit 1
+                    ;;
+            esac 
+            ;;       
+        \?)
+            # getopts issues an error message
+            echo $USAGE >&2
+            exit 1
+            ;;
+    esac
+done
+
+# Remove the switches we parsed above.
+shift `expr $OPTIND - 1`
+
+# We want 2 non-option argument. 
+if [ $# -ne 2 ]; then
+    if [ $# -lt 2 ]; then
+        echo "Missing arguments." >&2
+    fi
+    if [ $# -gt 2 ]; then
+        echo "Unknown extra arguments." >&2
+    fi
+    echo $USAGE >&2
+    exit 1
+fi
+
+## setup rsync option lists
+rsyncCommand="rsync "
+rsyncOptions="-a "
+if [ "$COMPRESS" = true ]; then
+    rsyncOptions=$rsyncOptions"-z " 
+fi
+if [ "$VERBOSE" = true ]; then
+    rsyncOptions=$rsyncOptions""
+    rsyncLongOptions=$rsyncLongOptions""
+fi
+
+rsyncCommand="$rsyncCommand$rsyncOptions$rsyncLongOptions"
+
+#
+PM1=$1
+BACKUP_SERVER_LOCATION=$2
+
+
+if ! ssh -q -o "BatchMode yes" $USER@$PM1 ls $INSTALL_DIR > /dev/null; then
+    echo "ERROR: Cannot connect to $USER@$PM1" >&2
+    echo "Check that ssh and passwordless login are available." >&2
+    exit 255
+fi
+
+###############################################################################
+# Get the system info from provided PM1
+###############################################################################
+getSystemInfo () {
+# Go grab PM1's columnstore.xml file and parse it to find out information on system nodes.
+
+command="$rsyncCommand $USER@$PM1:$INSTALL_DIR/etc/Columnstore.xml $BACKUP_SERVER_LOCATION"
+
+verbosePrint "$command"
+
+## rsync it over
+if ! $command; then
+    echo "ERROR: Failed to get Columnstore.xml file from PM1" >&2
+    exit 4
+fi
+
+## Reset rsync options if this is a dry run to print out stats data for transfers
+if [ "$DRY_RUN" = true ]; then
+    rsyncLongOptions=$rsyncLongOptions" --stats"
+    rsyncOptions=$rsyncOptions"-n "
+    rsyncCommand="rsync "
+    rsyncCommand="$rsyncCommand$rsyncOptions$rsyncLongOptions"
+fi
+
+## parse it
+systemName=$(xmllint --xpath 'string(//SystemName)' $BACKUP_SERVER_LOCATION/Columnstore.xml)
+singleServerInstall=$(xmllint --xpath 'string(//SingleServerInstall)' $BACKUP_SERVER_LOCATION/Columnstore.xml)
+serverTypeInstall=$(xmllint --xpath 'string(//ServerTypeInstall)' $BACKUP_SERVER_LOCATION/Columnstore.xml)
+PMwithUM=$(xmllint --xpath 'string(//PMwithUM)' $BACKUP_SERVER_LOCATION/Columnstore.xml)
+DBRootStorageType=$(xmllint --xpath 'string(//DBRootStorageType)' $BACKUP_SERVER_LOCATION/Columnstore.xml)
+
+umModuleCount=$(xmllint --xpath "string(//ModuleCount2)" $BACKUP_SERVER_LOCATION/Columnstore.xml)
+pmModuleCount=$(xmllint --xpath "string(//ModuleCount3)" $BACKUP_SERVER_LOCATION/Columnstore.xml)
+
+DBRootCount=$(xmllint --xpath 'string(//DBRootCount)' $BACKUP_SERVER_LOCATION/Columnstore.xml)
+for (( dbRootID=1; dbRootID<=$DBRootCount; dbRootID++ ))
+do
+    DBRoot[$dbRootID]=$(xmllint --xpath "string(//DBRoot$dbRootID)" $BACKUP_SERVER_LOCATION/Columnstore.xml)
+done
+
+if [ $singleServerInstall == "n" ]; then
+    detectError=false
+    for (( moduleID=1; moduleID<=$umModuleCount; moduleID++ ))
+    do
+        umModuleIP1=$(xmllint --xpath "string(//ModuleIPAddr$moduleID-1-2)" $BACKUP_SERVER_LOCATION/Columnstore.xml)
+        umModuleIP2=$(xmllint --xpath "string(//ModuleIPAddr$moduleID-2-2)" $BACKUP_SERVER_LOCATION/Columnstore.xml)
+        umModuleHostname1=$(xmllint --xpath "string(//ModuleHostName$moduleID-1-2)" $BACKUP_SERVER_LOCATION/Columnstore.xml)
+        umModuleHostname2=$(xmllint --xpath "string(//ModuleHostName$moduleID-2-2)" $BACKUP_SERVER_LOCATION/Columnstore.xml)
+        if ssh -q -o "BatchMode yes" $umModuleIP1 exit; then
+            umModuleIP[$moduleID]=$umModuleIP1
+            umModuleHostname[$moduleID]=$umModuleHostname1
+        elif ssh -q -o "BatchMode yes" $umModuleIP2 exit; then
+            umModuleIP[$moduleID]=$umModuleIP2
+            umModuleHostname[$moduleID]=$umModuleHostname2
+        else
+            echo "ERROR: cannot Connect to UM$moduleID" >&2
+            echo "(IP1 = $umModuleIP1)" >&2
+            echo "(IP2 = $umModuleIP2)" >&2
+            detectError=true
+        fi
+    done
+
+    for (( moduleID=1; moduleID<=$pmModuleCount; moduleID++ ))
+    do
+        pmModuleIP1=$(xmllint --xpath "string(//ModuleIPAddr$moduleID-1-3)" $BACKUP_SERVER_LOCATION/Columnstore.xml)
+        pmModuleIP2=$(xmllint --xpath "string(//ModuleIPAddr$moduleID-2-3)" $BACKUP_SERVER_LOCATION/Columnstore.xml)
+        pmModuleHostname1=$(xmllint --xpath "string(//ModuleHostName$moduleID-1-3)" $BACKUP_SERVER_LOCATION/Columnstore.xml)
+        pmModuleHostname2=$(xmllint --xpath "string(//ModuleHostName$moduleID-2-3)" $BACKUP_SERVER_LOCATION/Columnstore.xml)
+        
+        if ssh -q -o "BatchMode yes" $pmModuleIP1 exit; then
+            pmModuleIP[$moduleID]=$pmModuleIP1
+            pmModuleHostname[$moduleID]=$pmModuleHostname1
+        elif ssh -q -o "BatchMode yes" $pmModuleIP2 exit; then
+            pmModuleIP[$moduleID]=$pmModuleIP2
+            pmModuleHostname[$moduleID]=$pmModuleHostname2
+        else
+            echo "ERROR: Cannot connect to PM$moduleID" >&2
+            echo "(IP1 = $pmModuleIP1)" >&2
+            echo "(IP2 = $pmModuleIP2)" >&2
+            detectError=true
+        fi
+        
+        pmModuleDBRootCount[$moduleID]=$(xmllint --xpath "string(//ModuleDBRootCount$moduleID-3)" $BACKUP_SERVER_LOCATION/Columnstore.xml)     
+    done
+    
+    if [ "$detectError" = true ]; then
+        echo "Check that ssh and passwordless login are available." >&2
+        exit 255 
+    fi
+    
+elif [ $singleServerInstall == "y" ]; then
+    
+    for (( moduleID=1; moduleID<=$pmModuleCount; moduleID++ ))
+    do
+        pmModuleDBRootCount[$moduleID]=$(xmllint --xpath "string(//ModuleDBRootCount$moduleID-3)" $BACKUP_SERVER_LOCATION/Columnstore.xml)      
+    done
+    umModuleCount=1
+    umModuleIP[1]=$PM1
+    pmModuleIP[1]=$PM1
+       
+else
+    echo "Unknown install type = $installType" >&2
+    exit 2
+fi
+
+}
+
+###############################################################################
+# Mysqldump command building and execution
+# simple to modify exclusion/inclusions lists
+###############################################################################
+mysqldumpCMD () {
+
+SQLSTMT="SELECT schema_name FROM information_schema.schemata WHERE schema_name NOT IN (${EXCLUSION_LIST})"
+MYSQLDUMP_DATABASES="--databases"
+for DB in `ssh $USER@${umModuleIP[1]} $INSTALL_DIR/mysql/bin/mysql --defaults-file=/usr/local/mariadb/columnstore/mysql/my.cnf -u root -ANe\"${SQLSTMT}\"`
+do
+    MYSQLDUMP_DATABASES="${MYSQLDUMP_DATABASES} ${DB}"
+done
+MYSQLDUMP_OPTIONS="--skip-lock-tables --no-data"
+echo "Executing mysqldump..."
+command="ssh $USER@${umModuleIP[1]} $INSTALL_DIR/mysql/bin/mysqldump ${MYSQLDUMP_OPTIONS} ${MYSQLDUMP_DATABASES}"
+if [ "$DRY_RUN" = false ]; then
+    verbosePrint "$command  > $BACKUP_SERVER_LOCATION/MySQLDatabases.sql"
+    if ! $command  > $BACKUP_SERVER_LOCATION/MySQLDatabases.sql; then
+        echo "ERROR: COMMAND: $command -- returned a failure" >&2
+        echo "This needs to be resolved in order to continue restoring system." >&2
+        echo "Verify all configuration settings are accurate at $BACKUP_SERVER_LOCATION/Columnstore.xml" >&2                        
+        exit 5
+    fi
+else
+    echo "$command  > $BACKUP_SERVER_LOCATION/MySQLDatabases.sql"
+fi
+echo "DONE"
+
+}
+
+measureDiskSpace () {
+    for (( moduleID=1; moduleID<=$pmModuleCount; moduleID++ ))
+    do
+        for (( moduleDBRootID=1; moduleDBRootID<=${pmModuleDBRootCount[$moduleID]}; moduleDBRootID++ ))
+        do
+            thisDBrootID=$(xmllint --xpath "string(//ModuleDBRootID$moduleID-$moduleDBRootID-3)" $BACKUP_SERVER_LOCATION/Columnstore.xml)
+            command="ssh $USER@${pmModuleIP[$moduleID]} du -s -b ${DBRoot[$thisDBrootID]}"
+            verbosePrint "$command"
+            commandReturn=$($command)
+            returnValues=($commandReturn)
+            if [ ${returnValues[1]} == ${DBRoot[$thisDBrootID]} ]; then
+                totalDiskSpaceNeeded=$(( $totalDiskSpaceNeeded + ${returnValues[0]} ))
+                totalDiskSpaceNeededPM=$(( $totalDiskSpaceNeededPM + ${returnValues[0]} ))                
+            else
+                echo "failed return from command: $command" >&2
+                exit 2
+            fi
+        done        
+    done
+    if [ "$RAW" = true ]; then
+        command="ssh $USER@${umModuleIP[1]} du -s -b $INSTALL_DIR/mysql/db"
+        commandReturn=$($command)
+        returnValues=($commandReturn)
+        if [ ${returnValues[1]} == $INSTALL_DIR/mysql/db ]; then
+            totalDiskSpaceNeeded=$(( $totalDiskSpaceNeeded + ${returnValues[0]} ))
+            totalDiskSpaceNeededUM=${returnValues[0]}               
+        else
+            echo "failed return from command: $command" >&2
+            exit 2
+        fi
+    fi
+    totalDiskSpaceAvailable=$(df -B1 $BACKUP_SERVER_LOCATION | awk 'NR==2 {print $4}')
+}
+
+###############################################################################
+# monitorProgress
+###############################################################################
+monitorProgress () {
+percentDone=0
+oldSizeCopied=0
+totalSizeCopied=0
+sizeOfData=$1
+sleepInt=5
+while [ $percentDone -lt 99 ]
+do
+    cmdRtn=$(du -s -b $BACKUP_SERVER_LOCATION)
+    returnValues=($cmdRtn)
+    if [ ${returnValues[1]} == $BACKUP_SERVER_LOCATION ]; then
+        oldSizeCopied=$totalSizeCopied
+        totalSizeCopied=${returnValues[0]}
+        if (( $oldSizeCopied == 0 )); then
+            oldSizeCopied=$totalSizeCopied
+        fi
+    fi
+    # Compute the percentage.
+    percentDone=$(( $(( $totalSizeCopied * 100 )) / $sizeOfData ))
+    # Compute the number of blocks to represent the percentage.
+    numberSymbols=$(( percentDone / 4 ))
+    # Create the progress bar string.
+    bar="Progress ["
+    for (( num=0; num<=25; num++ ))
+    do
+        if (( $num < $numberSymbols )); then
+            bar=$bar"="
+        elif (( $num == $numberSymbols )); then
+            bar=$bar">"
+        else
+            bar=$bar" "
+        fi
+    done
+    # Print the progress bar.
+    diff=$(( $totalSizeCopied - $oldSizeCopied )) 
+    if (( $diff > 1000000 )); then
+    rate=$(( $diff / 1000000 / $sleepInt ))" Mbps "
+    elif (( $diff > 1000 )); then
+    rate=$(( $diff / 1000 / $sleepInt ))" kbps "
+    else
+    rate=$(( $diff / $sleepInt ))" bits/second "
+    fi
+    if (( $diff > 0 )); then   
+        remainingCopy=$(( $sizeOfData - $totalSizeCopied ))
+        remainingSeconds=$(( $remainingCopy / $(( $diff / $sleepInt )) ))
+        printHours=$(( $remainingSeconds / 3600 ))
+        printMinutes=$(( $(( $remainingSeconds % 3600 )) / 60 ))
+        printSeconds=$(( $remainingSeconds % 60 ))
+    else
+        printSeconds=0
+        printMinutes=0
+        printHours=0
+    fi
+    bar=$bar"] ($percentDone%) $rate "
+    line=$(printf "%02d:%02d:%02d %s" $printHours $printMinutes $printSeconds "Approx Time Remaining          ")
+    echo -en "${bar}${line}\r"
+    sleep $sleepInt
+done
+
+percentDone=100
+bar="Progress [=========================>] ($percentDone%) $rate "
+line=$(printf "%02d:%02d:%02d %s" $printHours $printMinutes $printSeconds "Approx Time Remaining          ")
+echo -en "${bar}${line}\n"
+
+}
+
+###############################################################################
+# Backup PM
+###############################################################################
+backupPMs () {
+echo "Backing up PMs"
+dir=$(mktemp -d)
+## loop the pmModules
+for (( moduleID=1; moduleID<=$pmModuleCount; moduleID++ ))
+do
+    for (( moduleDBRootID=1; moduleDBRootID<=${pmModuleDBRootCount[$moduleID]}; moduleDBRootID++ ))
+    do
+        thisDBrootID=$(xmllint --xpath "string(//ModuleDBRootID$moduleID-$moduleDBRootID-3)" $BACKUP_SERVER_LOCATION/Columnstore.xml)
+        pmBackupDir="pm""$moduleID""dbroot""$moduleDBRootID"
+        if [ ! -e $BACKUP_SERVER_LOCATION/$pmBackupDir ]; then
+            mkdir $BACKUP_SERVER_LOCATION/$pmBackupDir
+        fi
+        echo "Backing up $pmBackupDir"
+        command="$rsyncCommand $USER@${pmModuleIP[$moduleID]}:${DBRoot[$thisDBrootID]} $BACKUP_SERVER_LOCATION/$pmBackupDir"
+        # Launch it in background
+        if [ "$DRY_RUN" = false ]; then
+            verbosePrint "$command"
+            { $command ; echo "$?" > "/$dir/$pmBackupDir" ; } &
+        else
+            echo "$command"
+        fi
+    done        
+done
+if [ "$DRY_RUN" = false ]; then
+    echo "Waiting for backups to complete..."
+    monitorProgress $totalDiskSpaceNeeded
+    wait
+    for file in "$dir"/*; do
+        if [ $(<"$file") != 0 ]; then
+            echo "ERROR: RSYNC failed $file with Error: $(<"$file")" >&2
+            echo "Backup may not be usable." >&2                       
+            exit 6
+        fi
+    done
+    echo -e "\nDONE"
+fi
+}
+
+###############################################################################
+# Backup UM
+###############################################################################
+backupUM () {
+echo "Backing up UM"
+dir=$(mktemp -d)
+## loop the pmModules
+for (( moduleID=1; moduleID<=$umModuleCount; moduleID++ ))
+do
+    umBackupDir="um""$moduleID"
+    if [ ! -e $BACKUP_SERVER_LOCATION/$umBackupDir ]; then
+        mkdir $BACKUP_SERVER_LOCATION/$umBackupDir
+    fi
+    echo "Backing up $umBackupDir"
+    command="$rsyncCommand $USER@${umModuleIP[$moduleID]}:$INSTALL_DIR/mysql/db $BACKUP_SERVER_LOCATION/$umBackupDir"
+    
+    # Launch it in background
+    if [ "$DRY_RUN" = false ]; then
+        verbosePrint "$command"
+        { $command ; echo "$?" > "/$dir/$pmBackupDir" ; } &
+    else
+        echo "$command"
+    fi
+done
+
+if [ "$DRY_RUN" = false ]; then
+    echo "Waiting for backups to complete..."
+    # This will watch the backup location size and print status and progress bar
+    monitorProgress $totalDiskSpaceNeeded
+    # wait for all the PMs to complete
+    # should be short wait as monitorProgress loop saw most data had been transferred
+    wait
+    for file in "$dir"/*; do
+        if [ $(<"$file") != 0 ]; then
+            echo "ERROR: RSYNC failed $file with Error: $(<"$file")" >&2
+            echo "Backup may not be usable." >&2                       
+            exit 6
+        fi
+    done
+    echo -e "\nDONE"
+fi
+}
+
+
+backupCnf () {
+backupCnfDir="cnf"
+if [ ! -e $BACKUP_SERVER_LOCATION/$backupCnfDir ]; then
+    mkdir $BACKUP_SERVER_LOCATION/$backupCnfDir
+fi
+command="$rsyncCommand $USER@$PM1:$INSTALL_DIR/mysql/my.cnf $BACKUP_SERVER_LOCATION/$backupCnfDir"
+if [ "$DRY_RUN" = false ]; then
+    verbosePrint "$command"
+    if ! $command; then
+        echo "ERROR: Failed to get my.cnf file from PM1" >&2
+        exit 4
+    fi
+else
+    echo "$command"
+fi
+command="$rsyncCommand $USER@$PM1:$INSTALL_DIR/mysql/my.cnf.d $BACKUP_SERVER_LOCATION/$backupCnfDir"
+if [ "$DRY_RUN" = false ]; then
+    verbosePrint "$command"
+    if ! $command; then
+        echo "ERROR: Failed to get my.cnf.d from PM1" >&2
+        exit 4
+    fi
+else
+    echo "$command"
+fi
+}
+
+
+###############################################################################
+# 
+###############################################################################
+innoDBbackup () {
+echo "innoDBBackupCMD"
+innoDbBackupDIR="innoDBBackup"
+if [ ! -e $BACKUP_SERVER_LOCATION/$innoDbBackupDIR ]; then
+    mkdir $BACKUP_SERVER_LOCATION/$innoDbBackupDIR
+fi
+
+dbDIR=$INSTALL_DIR/mysql/db
+#Copy all InnoDB data files (ibdata files)
+command="$rsyncCommand $USER@${umModuleIP[1]}:$dbDIR/ibdata* $BACKUP_SERVER_LOCATION/$innoDbBackupDIR"
+if [ "$DRY_RUN" = false ]; then
+    verbosePrint "$command"
+    if ! $command; then
+        echo "ERROR: Failed to get ibdata files." >&2
+        exit 4
+    fi
+else
+    echo "$command"
+fi
+#Copy all the .ibd files and .frm files for InnoDB tables
+SQLSTMT="SELECT TABLE_SCHEMA FROM INFORMATION_SCHEMA.TABLES WHERE table_schema NOT IN (${EXCLUSION_LIST}) AND engine = 'InnoDB'"
+DBList=$(ssh $USER@${umModuleIP[1]} $INSTALL_DIR/mysql/bin/mysql --defaults-file=/usr/local/mariadb/columnstore/mysql/my.cnf -u root -ANe\"${SQLSTMT}\")
+for DB in $DBList
+do
+    DBs+=("$DB")
+done
+SQLSTMT="SELECT TABLE_NAME FROM INFORMATION_SCHEMA.TABLES WHERE table_schema NOT IN (${EXCLUSION_LIST}) AND engine = 'InnoDB'"
+TableList=$(ssh $USER@${umModuleIP[1]} $INSTALL_DIR/mysql/bin/mysql --defaults-file=/usr/local/mariadb/columnstore/mysql/my.cnf -u root -ANe\"${SQLSTMT}\")
+for Table in $TableList
+do
+    Tables+=("$Table")
+done
+for ((i=0; i<${#Tables[@]}; i++)); do
+    command="$rsyncCommand -R $USER@${umModuleIP[1]}:$dbDIR/${DBs[i]}/${Tables[i]}* $BACKUP_SERVER_LOCATION/$innoDbBackupDIR/"
+    if [ "$DRY_RUN" = false ]; then
+        verbosePrint "$command"
+        if ! $command; then
+            echo "ERROR: Failed to get innodb table ${Tables[i]}" >&2
+            exit 4
+        fi
+    else
+        echo "$command"
+    fi
+done
+#Copy all InnoDB log files (ib_logfile files) to a safe place.
+command="$rsyncCommand $USER@${umModuleIP[1]}:$dbDIR/ib_logfile* $BACKUP_SERVER_LOCATION/$innoDbBackupDIR"
+if [ "$DRY_RUN" = false ]; then
+    verbosePrint "$command"
+    if ! $command; then
+        echo "ERROR: Failed to get ib_logfiles" >&2
+        exit 4
+    fi
+else
+    echo "$command"
+fi
+
+}
+
+
+###############################################################################
+# suspendDBWrites
+###############################################################################
+suspendDBWrites () {
+if [ "$DRY_RUN" = false ]; then
+    if [ "$VERBOSE" = true ]; then
+        ssh $USER@$PM1 $INSTALL_DIR/bin/mcsadmin suspendDatabaseWrites y
+    else
+        echo "Suspend DB Writes"
+        ssh $USER@$PM1 $INSTALL_DIR/bin/mcsadmin suspendDatabaseWrites y > /dev/null
+    fi
+fi
+}
+
+
+###############################################################################
+# resumeDBWrites
+###############################################################################
+resumeDBWrites () {
+if [ "$DRY_RUN" = false ]; then
+    if [ "$VERBOSE" = true ]; then
+        ssh $USER@$PM1 $INSTALL_DIR/bin/mcsadmin resumeDatabaseWrites y
+    else
+        echo "Resume DB Writes"
+        ssh $USER@$PM1 $INSTALL_DIR/bin/mcsadmin resumeDatabaseWrites y > /dev/null
+    fi
+fi    
+}
+
+###############################################################################
+# Main Execution
+###############################################################################
+main () {
+
+
+## Get the system info from xml file
+getSystemInfo
+
+## Debug Prints
+verbosePrint ""
+verbosePrint "Configuration:"
+verbosePrint ""
+verbosePrint "Server PM1 address = $PM1"
+verbosePrint "Backup Server location = $BACKUP_SERVER_LOCATION"
+verbosePrint "SystemName: $systemName"
+verbosePrint "SingleServerInstall: $singleServerInstall"
+verbosePrint "serverTypeInstall:  $serverTypeInstall"
+verbosePrint "PMwithUM:  $PMwithUM"
+verbosePrint "DBRootStorageType: $DBRootStorageType"
+verbosePrint ""
+verbosePrint "UMs: $umModuleCount"
+verbosePrint "PMs: $pmModuleCount"
+for (( moduleID=1; moduleID<=$umModuleCount; moduleID++ ))
+do
+    verbosePrint "um$moduleID ip ${umModuleIP[$moduleID]}"
+    verbosePrint "um$moduleID host ${umModuleHostname[$moduleID]}"
+    verbosePrint ""
+done
+
+for (( moduleID=1; moduleID<=$pmModuleCount; moduleID++ ))
+do
+    verbosePrint "pm$moduleID ip ${pmModuleIP[$moduleID]}"
+    verbosePrint "pm$moduleID host ${pmModuleHostname[$moduleID]}"
+    verbosePrint "pm$moduleID DBRootCount: ${pmModuleDBRootCount[$moduleID]}"
+    verbosePrint ""
+done
+
+verbosePrint "DBRootCount: $DBRootCount"
+for (( dbRootID=1; dbRootID<=$DBRootCount; dbRootID++ ))
+do
+    verbosePrint "DBRoot$dbRootID: ${DBRoot[$dbRootID]}"
+done
+
+## Check if xmllint is available for use
+
+
+## Measure disk space usage and compare to available
+measureDiskSpace
+
+#verbosePrint "totalDiskSpaceNeededPM:    $totalDiskSpaceNeededPM"
+#verbosePrint "totalDiskSpaceNeededUM:    $totalDiskSpaceNeededUM"
+#verbosePrint "totalDiskSpaceAvailable:   $totalDiskSpaceAvailable"
+
+if (( $totalDiskSpaceAvailable < $totalDiskSpaceNeeded )); then
+    echo "ERROR: Not enough space on backup system" >&2
+    echo "(Needs = $totalDiskSpaceNeeded)" >&2
+    echo "(Avail = $totalDiskSpaceAvailable)" >&2
+    exit 3
+fi
+
+## suspend db writes
+suspendDBWrites
+
+## backup My.Cnf
+backupCnf
+
+if [ "$INNODB_BACKUP" = true ]; then
+    ## just get the innodb backups
+    innoDBbackup
+fi
+
+## backup UM
+if [ "$RAW" = true ]; then
+    backupUM
+else
+    mysqldumpCMD
+fi
+## launch PM backup in parallel to grab everything
+if [ "$LOGICAL" = false ]; then
+    backupPMs
+fi
+
+
+## resume db writes
+resumeDBWrites
+
+exit 0
+}
+
+###############################################################################
+# RUN MAIN
+###############################################################################
+main
+
+exit 0
+
