@@ -566,6 +566,7 @@ if [ "$DRY_RUN" = false ]; then
     fi
 else
     echo "$command"
+    $command
 fi
 if [ $BACKUP_SERVER_LOCATION/$backupCnfDir ]; then
     command="$rsyncCommand $BACKUP_SERVER_LOCATION/$backupCnfDir $USER@$PM1:$INSTALL_DIR/mysql/"
@@ -577,10 +578,12 @@ if [ $BACKUP_SERVER_LOCATION/$backupCnfDir ]; then
         fi
     else
         echo "$command"
+        $command
     fi
 fi
-
-restartSystem
+if [ "$DRY_RUN" = false ]; then
+    restartSystem
+fi
 echo -e "\nDONE"
 }
 
@@ -607,6 +610,7 @@ do
                 { $command ; echo "$?" > "/$dir/$pmBackupDir" ; } &
             else
                 echo "$command"
+                $command
             fi
         fi
     done
@@ -644,6 +648,7 @@ if [ -e $BACKUP_SERVER_LOCATION/MySQLDatabases.sql ]; then
         $command
     else
         echo "$command"
+        $command
     fi
     command="ssh $USER@${restore_umModuleIP[1]} $INSTALL_DIR/mysql/bin/mysql --defaults-file=/usr/local/mariadb/columnstore/mysql/my.cnf -u root < /tmp/MySQLDatabases.sql"
     if [ "$DRY_RUN" = false ]; then
@@ -670,6 +675,7 @@ else
                 $command &
             else
                 echo "$command"
+                $command
             fi
         fi
     done
@@ -695,6 +701,7 @@ if [ -e $BACKUP_SERVER_LOCATION/$innoDbBackupDIR ]; then
         $command &
     else
         echo "$command"
+        $command
     fi
     command="$rsyncCommand $BACKUP_SERVER_LOCATION/$innoDbBackupDIR/ib_logfile? $USER@${restore_umModuleIP[1]}:$dbdir"
     if [ "$DRY_RUN" = false ]; then
@@ -702,6 +709,7 @@ if [ -e $BACKUP_SERVER_LOCATION/$innoDbBackupDIR ]; then
         $command &
     else
         echo "$command"
+        $command
     fi
     
     command="$rsyncCommand $BACKUP_SERVER_LOCATION/$innoDbBackupDIR/$dbdir/ $USER@${restore_umModuleIP[1]}:$dbdir/"
@@ -709,7 +717,8 @@ if [ -e $BACKUP_SERVER_LOCATION/$innoDbBackupDIR ]; then
         verbosePrint "$command"
         $command &
     else
-        echo "$command"         
+        echo "$command"
+        $command         
     fi
 else
     echo "No InnoDB backup present"

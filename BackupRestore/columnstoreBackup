@@ -502,6 +502,7 @@ do
             { $command ; echo "$?" > "/$dir/$pmBackupDir" ; } &
         else
             echo "$command"
+            $command
         fi
     done        
 done
@@ -542,6 +543,7 @@ do
         { $command ; echo "$?" > "/$dir/$pmBackupDir" ; } &
     else
         echo "$command"
+        $command
     fi
 done
 
@@ -578,6 +580,7 @@ if [ "$DRY_RUN" = false ]; then
     fi
 else
     echo "$command"
+    $command
 fi
 command="$rsyncCommand $USER@$PM1:$INSTALL_DIR/mysql/my.cnf.d $BACKUP_SERVER_LOCATION/$backupCnfDir"
 if [ "$DRY_RUN" = false ]; then
@@ -588,6 +591,7 @@ if [ "$DRY_RUN" = false ]; then
     fi
 else
     echo "$command"
+    $command    
 fi
 }
 
@@ -613,6 +617,7 @@ if [ "$DRY_RUN" = false ]; then
     fi
 else
     echo "$command"
+    $command
 fi
 #Copy all the .ibd files and .frm files for InnoDB tables
 SQLSTMT="SELECT TABLE_SCHEMA FROM INFORMATION_SCHEMA.TABLES WHERE table_schema NOT IN (${EXCLUSION_LIST}) AND engine = 'InnoDB'"
@@ -637,6 +642,7 @@ for ((i=0; i<${#Tables[@]}; i++)); do
         fi
     else
         echo "$command"
+        $command
     fi
 done
 #Copy all InnoDB log files (ib_logfile files) to a safe place.
@@ -649,6 +655,7 @@ if [ "$DRY_RUN" = false ]; then
     fi
 else
     echo "$command"
+    $command    
 fi
 
 }
