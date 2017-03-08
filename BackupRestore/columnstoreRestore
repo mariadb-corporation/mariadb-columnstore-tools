@@ -141,8 +141,15 @@ if [ $# -ne 2 ]; then
     exit 1
 fi
 
-## setup rsync option lists
-# rsync -uhopgrvz --stats --progress root@192.168.56.211:/usr/local/mariadb/columnstore/etc/Columnstore.xml ./
+## Check rsync and xmllint are available
+if ! type rsync > /dev/null; then
+    echo "rsync is not installed. Please install and rerun." >&2
+    exit 2
+fi
+if ! type xmllint > /dev/null; then
+    echo "xmllint is not installed. Please install and rerun." >&2
+    exit 2
+fi
 ## setup rsync option lists
 rsyncCommand="rsync "
 rsyncOptions="-a"
@@ -188,6 +195,33 @@ verbosePrint "$command"
 ## rsync it over
 if ! $command; then
     echo "ERROR: Failed to get Columnstore.xml file from PM1" >&2
+    exit 4
+fi
+
+command="$rsyncCommand $USER@$PM1:$INSTALL_DIR/releasenum $restoreServerConfigeDir"
+
+verbosePrint "$command"
+
+## rsync it over
+if ! $command; then
+    echo "ERROR: Failed to get releasenum file from PM1" >&2 
+    exit 4
+fi
+
+source $BACKUP_SERVER_LOCATION/releasenum
+
+backupVersion=$version
+backupRelease=$release
+
+source $restoreServerConfigeDir/releasenum
+
+restoreVersion=$version
+restoreRelease=$release
+
+if [ $backupVersion != $restoreVersion ] || [ $backupRelease != $restoreRelease ]; then
+    echo "ERROR: Version/Release differs from backups Version/Release" >&2 
+    echo "Backup  = $backupVersion-$backupRelease" >&2 
+    echo "Restore = $restoreVersion-$restoreRelease" >&2  
     exit 4
 fi
 

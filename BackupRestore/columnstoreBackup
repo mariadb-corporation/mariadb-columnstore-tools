@@ -206,6 +206,15 @@ if [ $# -ne 2 ]; then
     exit 1
 fi
 
+## Check rsync and xmllint are available
+if ! type rsync > /dev/null; then
+    echo "rsync is not installed. Please install and rerun." >&2
+    exit 2
+fi
+if ! type xmllint > /dev/null; then
+    echo "xmllint is not installed. Please install and rerun." >&2
+    exit 2
+fi
 ## setup rsync option lists
 rsyncCommand="rsync "
 rsyncOptions="-a "
@@ -230,6 +239,7 @@ if ! ssh -q -o "BatchMode yes" $USER@$PM1 ls $INSTALL_DIR > /dev/null; then
     exit 255
 fi
 
+## TODO releasenum file rsync
 ###############################################################################
 # Get the system info from provided PM1
 ###############################################################################
@@ -242,7 +252,17 @@ verbosePrint "$command"
 
 ## rsync it over
 if ! $command; then
-    echo "ERROR: Failed to get Columnstore.xml file from PM1" >&2
+    echo "ERROR: Failed to get Columnstore.xml file from PM1" >&2 
+    exit 4
+fi
+
+command="$rsyncCommand $USER@$PM1:$INSTALL_DIR/releasenum $BACKUP_SERVER_LOCATION"
+
+verbosePrint "$command"
+
+## rsync it over
+if ! $command; then
+    echo "ERROR: Failed to get releasenum file from PM1" >&2
     exit 4
 fi
 
