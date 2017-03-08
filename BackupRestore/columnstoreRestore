@@ -638,7 +638,7 @@ do
         pmBackupDir="pm""$moduleID""dbroot""$moduleDBRootID"
         if [ -e $BACKUP_SERVER_LOCATION/$pmBackupDir ]; then
             echo "Restoring $pmBackupDir"
-            command="$rsyncCommand $BACKUP_SERVER_LOCATION/$pmBackupDir/data?/ $USER@${restore_pmModuleIP[$moduleID]}:${restore_DBRoot[$thisRestoreDBrootID]}"
+            command="$rsyncCommand $BACKUP_SERVER_LOCATION/$pmBackupDir/data?*/ $USER@${restore_pmModuleIP[$moduleID]}:${restore_DBRoot[$thisRestoreDBrootID]}"
             if [ "$DRY_RUN" = false ]; then
                 verbosePrint "$command"
                 { $command ; echo "$?" > "/$dir/$pmBackupDir" ; } &
