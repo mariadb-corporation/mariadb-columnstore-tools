@@ -13,8 +13,12 @@ NUMBER_BACKUPS=3
 if [ -e columnstoreBackup.config ]; then
     source columnstoreBackup.config
 fi
-if [ $NUMBER_BACKUPS -lt 0 ] && [ $NUMBER_BACKUPS -gt 100 ]; then
-    echo "NUMBER_BACKUPS must be an integer between 1 and 100 (value: $NUMBER_BACKUPS)" >&2
+REcheck='^[0-9]+$'
+if ! [[ $NUMBER_BACKUPS =~ $REcheck ]] ; then
+   echo "ERROR: NUMBER_BACKUPS not a number" >&2; exit 1
+fi
+if [ $NUMBER_BACKUPS -lt 0 ] || [ $NUMBER_BACKUPS -gt 20 ]; then
+    echo "ERROR: NUMBER_BACKUPS must be an integer between 1 and 100 (value: $NUMBER_BACKUPS)" >&2
     exit 1
 fi
 
