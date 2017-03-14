@@ -3,17 +3,20 @@
 VERBOSE=false
 QUIET=false
 COMPRESS=false
-INNODB_BACKUP=false
 INSTALL_DIR=/usr/local/mariadb/columnstore
-LOGICAL=false
-RAW=false
 PM1=none
 BACKUP_SERVER_LOCATION=none
-PASSWORD=""
 DRY_RUN=false
 REMOTE_USER=root
 NUMBER_BACKUPS=3
 
+if [ -e columnstoreBackup.config ]; then
+    source columnstoreBackup.config
+fi
+if [ $NUMBER_BACKUPS -lt 0 ] && [ $NUMBER_BACKUPS -gt 100 ]; then
+    echo "NUMBER_BACKUPS must be an integer between 1 and 100 (value: $NUMBER_BACKUPS)" >&2
+    exit 1
+fi
 
 ###
 # Print Fucntions
@@ -41,7 +44,7 @@ helpPrint () {
     echo "Columnstore.xml is stored in the top level of backupServerLocation"
     echo ""
     echo "The -n option uses the rsync link-dest option to enable incremental backups."
-    echo "These are stored in backup.0 thru backup.[n-1] from newest to oldest."
+    echo "These are stored in backup.1 thru backup.[n-1] from newest to oldest."
     echo "The impact on extra space needed is based on the amount data that changes."
     echo "with little to no data set changes the incremental backup size is small."
     echo ""
@@ -56,7 +59,6 @@ helpPrint () {
     echo "-v,--verbose      Print more verbose execution details." 
     echo "-d,--dry-run      Dry run and executes rsync dry run with stats." 
     echo "-z,--compress     Utilize the compression option for rsync."
-    echo "-n                Set the number of incremental backups to store. (Default 4)"     
     echo "--user=[user]     Change the user performing remote sessions. (Default: root)"
     echo ""
     echo "--install-dir=[PATH]  Change the install directory of ColumnStore."
@@ -65,17 +67,15 @@ helpPrint () {
 }
 
 verbosePrint () {
-
     if [ "$VERBOSE" = true ]; then
         echo $1 
     fi
-
 }
 
 
 
 # Parse command line options.
-while getopts hdzvn:-: OPT; do
+while getopts hdzv-: OPT; do
     case "$OPT" in
         h)
             echo $USAGE
@@ -90,15 +90,7 @@ while getopts hdzvn:-: OPT; do
             ;;      
         v)
             VERBOSE=true
-            ;;
-        n)
-            if [ $OPTARG -gt 0 ] && [ $OPTARG -lt 10 ]; then
-                NUMBER_BACKUPS=$(( $OPTARG - 1 ))
-            else
-                echo "-n must be an integer between 1 and 9" >&2
-            exit 1
-            fi
-            ;;          
+            ;;         
         -)  LONG_OPTARG="${OPTARG#*=}"
             ## Parsing hack for the long style of arguments.
             case $OPTARG in
@@ -218,14 +210,14 @@ fi
 
 ## EX ARG pm1dbroot1
 rotateBackups () {
-for (( backupNumber=0; backupNumber<$NUMBER_BACKUPS; backupNumber++ ))
+for (( backupNumber=1; backupNumber<=$NUMBER_BACKUPS; backupNumber++ ))
 do
     if [ ! -e $BACKUP_SERVER_LOCATION/backup.$backupNumber ]; then
         mkdir $BACKUP_SERVER_LOCATION/backup.$backupNumber
     fi
 done
 
-for (( backupNumber=$NUMBER_BACKUPS; backupNumber>0; backupNumber-- ))
+for (( backupNumber=$NUMBER_BACKUPS; backupNumber>=1; backupNumber-- ))
 do
     if [ $backupNumber -eq $NUMBER_BACKUPS ]; then
         rm -rf $BACKUP_SERVER_LOCATION/backup.$backupNumber
@@ -238,8 +230,8 @@ done
 moveBackupFiles () {
 moveThis=$1
 destPath=$2
-if [ ! -e $BACKUP_SERVER_LOCATION/backup.0 ]; then
-    mkdir $BACKUP_SERVER_LOCATION/backup.0
+if [ ! -e $BACKUP_SERVER_LOCATION/backup.1 ]; then
+    mkdir $BACKUP_SERVER_LOCATION/backup.1
 fi
 if [ "$DRY_RUN" = false ]; then
     if [ -e $BACKUP_SERVER_LOCATION/$moveThis ]; then
@@ -321,11 +313,11 @@ fi
 ###############################################################################
 getSystemInfo () {
 # Go grab PM1's columnstore.xml file and parse it to find out information on system nodes.
-moveBackupFiles Columnstore.xml ./backup.0/
-executeRsync false --link-dest=./backup.0 $REMOTE_USER@$PM1:$INSTALL_DIR/etc/Columnstore.xml $BACKUP_SERVER_LOCATION 
+moveBackupFiles Columnstore.xml ./backup.1/
+executeRsync false --link-dest=./backup.1 $REMOTE_USER@$PM1:$INSTALL_DIR/etc/Columnstore.xml $BACKUP_SERVER_LOCATION 
 
-moveBackupFiles releasenum ./backup.0/
-executeRsync false --link-dest=./backup.0 $REMOTE_USER@$PM1:$INSTALL_DIR/releasenum $BACKUP_SERVER_LOCATION
+moveBackupFiles releasenum ./backup.1/
+executeRsync false --link-dest=./backup.1 $REMOTE_USER@$PM1:$INSTALL_DIR/releasenum $BACKUP_SERVER_LOCATION
 
 ## parse it
 systemName=$(xmllint --xpath 'string(//SystemName)' $BACKUP_SERVER_LOCATION/Columnstore.xml)
@@ -577,9 +569,9 @@ do
             mkdir $BACKUP_SERVER_LOCATION/$pmBackupDir
         fi
         echo "Backing up $pmBackupDir"
-        moveBackupFiles $pmBackupDir ./backup.0/
+        moveBackupFiles $pmBackupDir ./backup.1/
         # Launch it in background
-        executeRsyncBackground $DRY_RUN /$dir/$pmBackupDir --link-dest=../backup.0/$pmBackupDir $REMOTE_USER@${pmModuleIP[$moduleID]}:${DBRoot[$thisDBrootID]} $BACKUP_SERVER_LOCATION/$pmBackupDir
+        executeRsyncBackground $DRY_RUN /$dir/$pmBackupDir --link-dest=../backup.1/$pmBackupDir $REMOTE_USER@${pmModuleIP[$moduleID]}:${DBRoot[$thisDBrootID]} $BACKUP_SERVER_LOCATION/$pmBackupDir
     done        
 done
 
@@ -603,9 +595,9 @@ do
     fi
     
     echo "Backing up $umBackupDir"
-    moveBackupFiles $umBackupDir ./backup.0/
+    moveBackupFiles $umBackupDir ./backup.1/
     # Launch it in background
-    executeRsync $DRY_RUN --link-dest=../backup.0/$umBackupDir $REMOTE_USER@${umModuleIP[$moduleID]}:$INSTALL_DIR/mysql/db $BACKUP_SERVER_LOCATION/$umBackupDir
+    executeRsync $DRY_RUN --link-dest=../backup.1/$umBackupDir $REMOTE_USER@${umModuleIP[$moduleID]}:$INSTALL_DIR/mysql/db $BACKUP_SERVER_LOCATION/$umBackupDir
 done
 
 #waitRsyncBackground $totalDiskSpaceNeededUM $dir
@@ -618,10 +610,10 @@ backupCnfDir="cnf"
 if [ ! -e $BACKUP_SERVER_LOCATION/$backupCnfDir ]; then
     mkdir $BACKUP_SERVER_LOCATION/$backupCnfDir
 fi
-moveBackupFiles $backupCnfDir ./backup.0/
+moveBackupFiles $backupCnfDir ./backup.1/
 
-executeRsync $DRY_RUN --link-dest=../backup.0/$backupCnfDir $REMOTE_USER@$PM1:$INSTALL_DIR/mysql/my.cnf $BACKUP_SERVER_LOCATION/$backupCnfDir/
-executeRsync $DRY_RUN --link-dest=../backup.0/$backupCnfDir $REMOTE_USER@$PM1:$INSTALL_DIR/mysql/my.cnf.d $BACKUP_SERVER_LOCATION/$backupCnfDir/
+executeRsync $DRY_RUN --link-dest=../backup.1/$backupCnfDir $REMOTE_USER@$PM1:$INSTALL_DIR/mysql/my.cnf $BACKUP_SERVER_LOCATION/$backupCnfDir/
+executeRsync $DRY_RUN --link-dest=../backup.1/$backupCnfDir $REMOTE_USER@$PM1:$INSTALL_DIR/mysql/my.cnf.d $BACKUP_SERVER_LOCATION/$backupCnfDir/
 }
 
 
