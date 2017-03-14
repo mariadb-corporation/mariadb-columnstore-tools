@@ -433,7 +433,7 @@ measureDiskSpace () {
             fi
         done        
     done
-    for (( moduleID=1; moduleID<=$pmModuleCount; moduleID++ ))
+    for (( moduleID=1; moduleID<=$umModuleCount; moduleID++ ))
     do
         command="ssh $REMOTE_USER@${umModuleIP[$moduleID]} du -s -b $INSTALL_DIR/mysql/db"
         commandReturn=$($command)
