@@ -12,6 +12,50 @@ BACKUP_SERVER_LOCATION=none
 PASSWORD=""
 DRY_RUN=false
 REMOTE_USER=root
+LOG_FILE=$0.log
+
+exec 3>&1 1>${LOG_FILE} 2>&1
+
+startTime=`date +%s`
+
+printLog () {
+    LOGTIME="[`date "+%Y-%m-%d %H:%M:%S"`] "
+    echo $LOGTIME$* | tee /dev/fd/3
+}
+
+verbosePrint () {
+    if [ "$VERBOSE" = true ]; then
+        printLog $*
+    fi
+}
+##
+## ERROR CODES
+##
+## 1   - command line parameter or config file issue detected
+## 2   - missing rsync or xmllint
+## 3   - detected issue with disk space
+## 4   - detected bad configuration file settings
+## 5   - rsync command failed with an error
+## 6   - DB is not ready for restore
+## 7   - ColumnStore processes were still running
+## 255 - could not connect via passwordless ssh
+reportStatus () {
+    if [ $1 != 0 ]; then
+        printLog "Backup Status: Failed"
+    else
+        printLog "Backup Status: Success"
+    fi
+    endTime=`date +%s`
+    runtime=$(( $endTime - $startTime ))
+    runtimeHours=$(( $runtime / 3600 ))
+    runtimeMinutes=$(( $(( $runtime % 3600 )) / 60 ))
+    runtimeSeconds=$(( $runtime % 60 ))
+    line=$(printf "%02d:%02d:%02d" $runtimeHours $runtimeMinutes $runtimeSeconds)
+    printLog Runtime: $line
+    exit $1
+}
+
+printLog "[$USER] $0 $@"
 
 ###
 # Print Fucntions
@@ -32,7 +76,7 @@ helpPrint () {
     echo ""
     echo "The tool expects MariaDB Columnstore to be shutdown in a fresh install state."
     echo "Take the following steps to prepare system for restore: "
-    echo "1. mcsadmin shutdownsystem y  // from pm1"
+    echo "1. mcsadmin shutdownsystem y  // from active parent OAM module"
     echo "2. rm -rf /usr/local/mariadb/columnstore/data*/000.dir // run on all pm nodes"
     echo "3. rm -rf /usr/local/mariadb/columnstore/data1/systemFiles/dbrm/* // run on pm1"
     echo "      on all um or combo pm front-end nodes"
@@ -44,8 +88,8 @@ helpPrint () {
     echo ""
     echo "Usage: $0 [options] backupServerLocation restoreServerPM1"
     echo ""
-    echo "pm1                       IP address of ColumnStore server"
-    echo "                              (PM1 if Multi-Node install)"
+    echo "PM1                       IP address of ColumnStore server"
+    echo "                             (Assumes PM1 = Active Parent OAM Module)"
     echo "backupServerLocation      Path to the directory for storing backup files."
     echo ""    
     echo "OPTIONS:"
@@ -59,11 +103,7 @@ helpPrint () {
     echo "                          Default: /usr/local/mariadb/columnstore"
 }
 
-verbosePrint () {
-    if [ "$VERBOSE" = true ]; then
-        echo $1 
-    fi
-}
+
 
 # Parse command line options.
 while getopts hdzv-: OPT; do
@@ -101,33 +141,33 @@ while getopts hdzv-: OPT; do
                     REMOTE_USER="$LONG_OPTARG" 
                     ;;                    
                 install-dir* )  
-                    echo "No arg for --$OPTARG option" >&2
-                    exit 1
+                    printLog "No arg for --$OPTARG option" >&2
+                    reportStatus 1
                     ;;
                 user* )  
-                    echo "No arg for --$OPTARG option" >&2
-                    exit 1
+                    printLog "No arg for --$OPTARG option" >&2
+                    reportStatus 1
                     ;;                        
                 compress* )
-                    echo "No arg allowed for --$OPTARG option" >&2
-                    exit 1 
+                    printLog "No arg allowed for --$OPTARG option" >&2
+                    reportStatus 1 
                     ;;
                 dry-run* )
-                    echo "No arg allowed for --$OPTARG option" >&2
-                    exit 1
+                    printLog "No arg allowed for --$OPTARG option" >&2
+                    reportStatus 1
                     ;;                    
                 '' )
                     break ;; # "--" terminates argument processing
                 * )
-                    echo "Illegal option --$OPTARG" >&2
-                    exit 1
+                    printLog "Illegal option --$OPTARG" >&2
+                    reportStatus 1
                     ;;
             esac 
             ;;       
         \?)
             # getopts issues an error message
             helpPrint
-            exit 1
+            reportStatus 1
             ;;
     esac
 done
@@ -138,29 +178,29 @@ shift `expr $OPTIND - 1`
 # We want 2 non-option argument. 
 if [ $# -ne 2 ]; then
     if [ $# -lt 2 ]; then
-        echo "Missing arguments." >&2
+        printLog "Missing arguments." >&2
     fi
     if [ $# -gt 2 ]; then
-        echo "Unknown extra arguments." >&2
+        printLog "Unknown extra arguments." >&2
     fi
-    echo $USAGE >&2
-    exit 1
+    printLog $USAGE >&2
+    reportStatus 1
 fi
 
 ## Check if root or sudo
 if [[ $EUID -ne 0 ]]; then
-   echo "This script must be run as root or with sudo" 
-   exit 1
+   printLog "This script must be run as root or with sudo" 
+   reportStatus 1
 fi
 
 ## Check rsync and xmllint are available
 if ! type rsync > /dev/null; then
-    echo "rsync is not installed. Please install and rerun." >&2
-    exit 2
+    printLog "rsync is not installed. Please install and rerun." >&2
+    reportStatus 2
 fi
 if ! type xmllint > /dev/null; then
-    echo "xmllint is not installed. Please install and rerun." >&2
-    exit 2
+    printLog "xmllint is not installed. Please install and rerun." >&2
+    reportStatus 2
 fi
 
 #
@@ -183,9 +223,9 @@ rsyncCommand="$rsyncCommand$rsyncOptions$rsyncLongOptions"
 
 
 if ! ssh -q -o "BatchMode yes" $REMOTE_USER@$PM1 ls $INSTALL_DIR > /dev/null; then
-    echo "ERROR: Cannot connect to $REMOTE_USER@$PM1" >&2
-    echo "Check that ssh and passwordless login are available." >&2
-    exit 255
+    printLog "ERROR: Cannot connect to $REMOTE_USER@$PM1" >&2
+    printLog "Check that ssh and passwordless login are available." >&2
+    reportStatus 255
 fi
 
 restoreServerConfigeDir=$BACKUP_SERVER_LOCATION/restoreConfig
@@ -210,12 +250,12 @@ command="$rsyncCommand $extraOptions $source $dest"
 if [ "$dryRunFlag" = false ]; then
     verbosePrint "$command"
     if ! $command; then
-        echo "ERROR: Rsync command failed." >&2
-        echo "ERROR Command: $command" >&2
-        exit 4
+        printLog "ERROR: Rsync command failed." >&2
+        printLog "ERROR Command: $command" >&2
+        reportStatus 5
     fi
 else
-    echo "$command"
+    printLog "$command"
     $command    
 fi
 }
@@ -238,7 +278,7 @@ if [ "$dryRunFlag" = false ]; then
     verbosePrint "$command"
     { $command ; echo "$?" > "$resultsDir" ; } &
 else
-    echo "$command"
+    printLog "$command"
     $command
 fi
 }
@@ -248,15 +288,15 @@ dataSize=$1
 moduleID=$2
 dir=$3
 if [ "$DRY_RUN" = false ]; then
-    echo "Waiting for restore to complete..."
+    printLog "Waiting for restore to complete..."
     monitorProgress $dataSize $moduleID
     wait
     for file in "$dir"/*; do
         if [ $(<"$file") != 0 ]; then
-            echo "ERROR: RSYNC failed $file with Error: $(<"$file")" >&2
-            echo "System may not be restored." >&2  
+            printLog "ERROR: RSYNC failed $file with Error: $(<"$file")" >&2
+            printLog "System may not be restored." >&2  
             rm -r "$dir"                     
-            exit 6
+            reportStatus 5
         fi
     done
 fi
@@ -285,10 +325,10 @@ restoreVersion=$version
 restoreRelease=$release
 
 if [ $backupVersion != $restoreVersion ] || [ $backupRelease != $restoreRelease ]; then
-    echo "ERROR: Version/Release differs from backups Version/Release" >&2 
-    echo "Backup  = $backupVersion-$backupRelease" >&2 
-    echo "Restore = $restoreVersion-$restoreRelease" >&2  
-    exit 4
+    printLog "ERROR: Version/Release differs from backups Version/Release" >&2 
+    printLog "Backup  = $backupVersion-$backupRelease" >&2 
+    printLog "Restore = $restoreVersion-$restoreRelease" >&2  
+    reportStatus 4
 fi
 
 ## parse it
@@ -320,9 +360,9 @@ if [ $restore_singleServerInstall == "n" ]; then
             restore_umModuleIP[$moduleID]=$umModuleIP2
             restore_umModuleHostname[$moduleID]=$umModuleHostname2
         else
-            echo "ERROR: cannot Connect to UM$moduleID" >&2
-            echo "(IP1 = $umModuleIP1)" >&2
-            echo "(IP2 = $umModuleIP2)" >&2
+            printLog "ERROR: cannot Connect to UM$moduleID" >&2
+            printLog "(IP1 = $umModuleIP1)" >&2
+            printLog "(IP2 = $umModuleIP2)" >&2
             detectError=true
         fi
     done
@@ -341,9 +381,9 @@ if [ $restore_singleServerInstall == "n" ]; then
             restore_pmModuleIP[$moduleID]=$pmModuleIP2
             restore_pmModuleHostname[$moduleID]=$pmModuleHostname2
         else
-            echo "ERROR: Cannot connect to PM$moduleID" >&2
-            echo "(IP1 = $pmModuleIP1)" >&2
-            echo "(IP2 = $pmModuleIP2)" >&2
+            printLog "ERROR: Cannot connect to PM$moduleID" >&2
+            printLog "(IP1 = $pmModuleIP1)" >&2
+            printLog "(IP2 = $pmModuleIP2)" >&2
             detectError=true
         fi
         
@@ -360,8 +400,8 @@ if [ $restore_singleServerInstall == "n" ]; then
     fi
         
     if [ "$detectError" = true ]; then
-        echo "Check that ssh and passwordless login are available." >&2
-        exit 255 
+        printLog "Check that ssh and passwordless login are available." >&2
+        reportStatus 255 
     fi
     
 elif [ $restore_singleServerInstall == "y" ]; then
@@ -375,8 +415,8 @@ elif [ $restore_singleServerInstall == "y" ]; then
     restore_pmModuleIP[1]=$PM1
        
 else
-    echo "Unknown install type = $installType" >&2
-    exit 2
+    printLog "Unknown install type = $installType" >&2
+    reportStatus 4
 fi
 
 
@@ -394,23 +434,23 @@ backup_DBRootCount=$(xmllint --xpath 'string(//DBRootCount)' $BACKUP_SERVER_LOCA
 
 errorDetected=false
 if [ $backup_singleServerInstall != $restore_singleServerInstall ]; then
-    echo "ERROR: SINGLE and MULTI server installations detected:" >&2
-    echo "Restore SingleServerInstall: $restore_singleServerInstall" >&2
-    echo "Backup  SingleServerInstall: $backup_singleServerInstall" >&2
+    printLog "ERROR: SINGLE and MULTI server installations detected:" >&2
+    printLog "Restore SingleServerInstall: $restore_singleServerInstall" >&2
+    printLog "Backup  SingleServerInstall: $backup_singleServerInstall" >&2
     errorDetected=true
 elif [ $backup_serverTypeInstall != $restore_serverTypeInstall ]; then
-    echo "ERROR: MISMATCH Server installation types detected:" >&2
-    echo "Restore ServerInstallType: $restore_serverTypeInstall" >&2
-    echo "Backup  ServerInstallType: $backup_serverTypeInstall" >&2
+    printLog "ERROR: MISMATCH Server installation types detected:" >&2
+    printLog "Restore ServerInstallType: $restore_serverTypeInstall" >&2
+    printLog "Backup  ServerInstallType: $backup_serverTypeInstall" >&2
     errorDetected=true
 elif [ $backup_PMwithUM != $restore_PMwithUM ]; then
-    echo "ERROR: MISMATCH PM with UM installation detected:" >&2
-    echo "Restore PMwithUM: $restore_PMwithUM" >&2
-    echo "Backup  PMwithUM: $backup_PMwithUM" >&2
+    printLog "ERROR: MISMATCH PM with UM installation detected:" >&2
+    printLog "Restore PMwithUM: $restore_PMwithUM" >&2
+    printLog "Backup  PMwithUM: $backup_PMwithUM" >&2
     errorDetected=true
 fi
 if [ "$errorDetected" = true ]; then
-    exit 3
+    reportStatus 4
 fi
 
 for (( moduleID=1; moduleID<=$backup_umModuleCount; moduleID++ ))
@@ -419,10 +459,10 @@ do
     umModuleIP2=$(xmllint --xpath "string(//ModuleIPAddr$moduleID-2-2)" $restoreServerConfigeDir/Columnstore.xml)
 
     if [ ${restore_umModuleIP[$moduleID]} != $umModuleIP1 ] && [ ${restore_umModuleIP[$moduleID]} != $umModuleIP2 ]; then
-        echo "ERROR: Restore and Backup IP addresses differ at UM$moduleID" >&2
-        echo "(Restore  IP  = $restore_umModuleIP[$moduleID])" >&2
-        echo "(Backup   IP1 = $umModuleIP1)" >&2
-        echo "(Backup   IP2 = $umModuleIP2)" >&2
+        printLog "ERROR: Restore and Backup IP addresses differ at UM$moduleID" >&2
+        printLog "(Restore  IP  = $restore_umModuleIP[$moduleID])" >&2
+        printLog "(Backup   IP1 = $umModuleIP1)" >&2
+        printLog "(Backup   IP2 = $umModuleIP2)" >&2
         detectError=true
     fi
 done
@@ -434,10 +474,10 @@ do
     pmModuleIP2=$(xmllint --xpath "string(//ModuleIPAddr$moduleID-2-3)" $BACKUP_SERVER_LOCATION/Columnstore.xml)
 
     if [ ${restore_pmModuleIP[$moduleID]} != $pmModuleIP1 ] && [ ${restore_pmModuleIP[$moduleID]} != $pmModuleIP2 ]; then
-        echo "ERROR: Restore and Backup IP addresses differ at PM$moduleID" >&2
-        echo "(Restore  IP  = $restore_pmModuleIP[$moduleID])" >&2
-        echo "(Backup   IP1 = $pmModuleIP1)" >&2
-        echo "(Backup   IP2 = $pmModuleIP2)" >&2
+        printLog "ERROR: Restore and Backup IP addresses differ at PM$moduleID" >&2
+        printLog "(Restore  IP  = $restore_pmModuleIP[$moduleID])" >&2
+        printLog "(Backup   IP1 = $pmModuleIP1)" >&2
+        printLog "(Backup   IP2 = $pmModuleIP2)" >&2
         errorDetected=true
     fi
 
@@ -452,34 +492,34 @@ fi
 ###############################################################################
 errorDetected=false
 if [ $backup_umModuleCount != $restore_umModuleCount ]; then
-    echo "ERROR: UM Module Count difference detected:" >&2
-    echo "Restore UM Count: $restore_umModuleCount" >&2
-    echo "Backup  UM Count: $backup_umModuleCount" >&2
+    printLog "ERROR: UM Module Count difference detected:" >&2
+    printLog "Restore UM Count: $restore_umModuleCount" >&2
+    printLog "Backup  UM Count: $backup_umModuleCount" >&2
     errorDetected=true
 elif [ $backup_pmModuleCount != $restore_pmModuleCount ]; then
-    echo "ERROR: UM Module Count difference detected:" >&2
-    echo "Restore PM Count: $restore_pmModuleCount" >&2
-    echo "Backup  PM Count: $backup_pmModuleCount" >&2
+    printLog "ERROR: UM Module Count difference detected:" >&2
+    printLog "Restore PM Count: $restore_pmModuleCount" >&2
+    printLog "Backup  PM Count: $backup_pmModuleCount" >&2
     errorDetected=true
 elif [ $backup_DBRootCount != $restore_DBRootCount ]; then
-    echo "ERROR: DBRoot Count difference detected:" >&2
-    echo "Restore DBRoot Count: $restore_DBRootCount" >&2
-    echo "Backup  DBRoot Count: $backup_DBRootCount" >&2
+    printLog "ERROR: DBRoot Count difference detected:" >&2
+    printLog "Restore DBRoot Count: $restore_DBRootCount" >&2
+    printLog "Backup  DBRoot Count: $backup_DBRootCount" >&2
     errorDetected=true
 else
     for (( moduleID=1; moduleID<=$backup_pmModuleCount; moduleID++ ))
     do
         if [ ${backup_pmModuleDBRootCount[$moduleID]} != ${restore_pmModuleDBRootCount[$moduleID]} ]; then
-            echo "ERROR: PM Module $moduleID DBRoot Count difference detected:" >&2
-            echo "Restore PM Module $moduleID DBRoot Count: ${restore_pmModuleDBRootCount[$moduleID]}" >&2
-            echo "Backup PM Module $moduleID DBRoot Count: ${backup_pmModuleDBRootCount[$moduleID]}" >&2
+            printLog "ERROR: PM Module $moduleID DBRoot Count difference detected:" >&2
+            printLog "Restore PM Module $moduleID DBRoot Count: ${restore_pmModuleDBRootCount[$moduleID]}" >&2
+            printLog "Backup PM Module $moduleID DBRoot Count: ${backup_pmModuleDBRootCount[$moduleID]}" >&2
             errorDetected=true
         fi      
     done
 fi
 
 if [ "$errorDetected" = true ]; then
-    exit 3
+    reportStatus 4
 fi
 
 }
@@ -507,8 +547,8 @@ totalBackupSize=0
             if [ ${returnValues[1]} == ${restore_DBRoot[$thisRestoreDBrootID]} ]; then
                 thisRestoreSpaceUsed=${returnValues[0]}
             else
-                echo "failed return from command: $commandReturn" >&2
-                exit 2
+                printLog "failed return from command: $commandReturn" >&2
+                reportStatus 3
             fi
             thisRestoreSpaceAvail=$(( $thisRestoreSpaceFree + $thisRestoreSpaceUsed ))
             moduleDBRootBackupDir="pm""$moduleID""dbroot""$moduleDBRootID"
@@ -519,17 +559,17 @@ totalBackupSize=0
                 totalBackupSize=$(( $totalBackupSize + $thisBackupSize))
                 pmModuleBackupSize[$moduleID]=$(( ${pmModuleBackupSize[$moduleID]} + $thisBackupSize))
             else
-                echo "failed return from command: $commandReturn" >&2
-                exit 2
+                printLog "failed return from command: $commandReturn" >&2
+                reportStatus 3
             fi
             #verbosePrint "SpaceAvail:     $thisRestoreSpaceAvail"
             #verbosePrint "SpaceNeeded:    $thisBackupSize"
 
             if (( $thisRestoreSpaceAvail < $thisBackupSize )); then
-                echo "ERROR: Not enough space on backup system" >&2
-                echo "(Needs = $thisBackupSize)" >&2
-                echo "(Avail = $thisRestoreSpaceFree)" >&2
-                exit 3
+                printLog "ERROR: Not enough space on backup system" >&2
+                printLog "(Needs = $thisBackupSize)" >&2
+                printLog "(Avail = $thisRestoreSpaceFree)" >&2
+                reportStatus 3
             fi
         done
     done   
@@ -624,7 +664,7 @@ do
     
     bar=$bar"] ($percentDone%) $rate "
     line=$(printf "%02d:%02d:%02d %s" $printHours $printMinutes $printSeconds "Approx Time Remaining          ")
-    echo -en "${bar}${line}\r"
+    echo -en "${bar}${line}\r" 1>&3
     if [ $stallCount -gt 5 ]; then
         rsyncStalled=true;
         break
@@ -637,7 +677,7 @@ if [ $rsyncStalled == false ]; then
     percentDone=100
     bar="Progress [=========================>] ($percentDone%) $rate "
     line=$(printf "%02d:%02d:%02d %s" $printHours $printMinutes $printSeconds "Approx Time Remaining          ")
-    echo -en "${bar}${line}\n"
+    echo -en "${bar}${line}\n" 1>&3
 fi
 }
 
@@ -646,7 +686,7 @@ fi
 # Restore Config
 ###############################################################################
 restoreConfig () {
-echo "Config Restore..."
+printLog "Config Restore..."
 
 backupCnfDir="cnf"
 
@@ -656,7 +696,7 @@ if [ $BACKUP_SERVER_LOCATION/$backupCnfDir ]; then
     executeRsync $DRY_RUN "" $BACKUP_SERVER_LOCATION/$backupCnfDir $REMOTE_USER@$PM1:$INSTALL_DIR/mysql/
 fi
 
-echo -e "\nDONE"
+printLog "DONE"
 }
 
 
@@ -664,25 +704,32 @@ echo -e "\nDONE"
 # Restore PM
 ###############################################################################
 restorePMs () {
-echo "Restoring PMs"
+printLog "Restoring PMs"
 dir=$(mktemp -d)
 ## loop the pmModules
 for (( moduleID=1; moduleID<=$restore_pmModuleCount; moduleID++ ))
 do
-    echo "Restoring PM$moduleID"
+    printLog "Restoring PM$moduleID"
     for (( moduleDBRootID=1; moduleDBRootID<=${restore_pmModuleDBRootCount[$moduleID]}; moduleDBRootID++ ))
     do
         thisRestoreDBrootID=$(xmllint --xpath "string(//ModuleDBRootID$moduleID-$moduleDBRootID-3)" $restoreServerConfigeDir/Columnstore.xml)
         pmBackupDir="pm""$moduleID""dbroot""$moduleDBRootID"
         if [ -e $BACKUP_SERVER_LOCATION/$pmBackupDir ]; then
-            echo "Restoring $pmBackupDir"
+            printLog "Restoring $pmBackupDir"
             executeRsyncBackground $DRY_RUN /$dir/$pmBackupDir "" $BACKUP_SERVER_LOCATION/$pmBackupDir/data?*/ $REMOTE_USER@${restore_pmModuleIP[$moduleID]}:${restore_DBRoot[$thisRestoreDBrootID]}
         fi
     done
     waitRsyncBackground ${pmModuleBackupSize[$moduleID]} $moduleID $dir
+    if [ $PMwithUM == "yes" ]; then
+        pmBackupDirDB="pm"$moduleID"DB"
+        if [ -e $BACKUP_SERVER_LOCATION/$pmBackupDirDB ]; then
+            printLog "Restoring from $pmBackupDir local query data"
+            executeRsync $DRY_RUN "" $BACKUP_SERVER_LOCATION/$pmBackupDirDB/db/ $REMOTE_USER@${restore_pmModuleIP[$moduleID]}:$INSTALL_DIR/mysql/db
+        fi
+    fi
 done
 rm -rf "$dir"
-echo -e "\nDONE"
+printLog "DONE"
 }
 
 
@@ -690,15 +737,15 @@ echo -e "\nDONE"
 # Restore UM
 ###############################################################################
 restoreUM () {
-echo "Restoring UMs"
+printLog "Restoring UMs"
 for (( moduleID=1; moduleID<=$restore_umModuleCount; moduleID++ )) 
 do
     umBackupDir="um""$moduleID"
     if [ -e $BACKUP_SERVER_LOCATION/$umBackupDir ]; then
-        echo "Restoring $umBackupDir..."
+        printLog "Restoring $umBackupDir..."
         executeRsync $DRY_RUN "" $BACKUP_SERVER_LOCATION/$umBackupDir/db/ $REMOTE_USER@${restore_umModuleIP[$moduleID]}:$INSTALL_DIR/mysql/db
     fi
-echo -e "\nDONE"
+printLog "DONE"
 done
 }
 
@@ -715,7 +762,7 @@ do
     for dbDir in $DBs
     do
         if [ $dbDir != $INSTALL_DIR/mysql/db/ ]; then
-            echo "ERROR: UM$moduleID: db directory found -- $dbDir" >&2
+            printLog "ERROR: UM$moduleID: db directory found -- $dbDir" >&2
             errors=true
         fi
     done
@@ -726,21 +773,21 @@ do
     do
         thisRestoreDBrootID=$(xmllint --xpath "string(//ModuleDBRootID$moduleID-$moduleDBRootID-3)" $restoreServerConfigeDir/Columnstore.xml)
         if (ssh $REMOTE_USER@${restore_pmModuleIP[$moduleID]} "[ -d ${restore_DBRoot[$thisRestoreDBrootID]}/000.dir ]"); then
-            echo "ERROR: PM$moduleID: data directory found -- ${restore_DBRoot[$thisRestoreDBrootID]}/000.dir"
+            printLog "ERROR: PM$moduleID: data directory found -- ${restore_DBRoot[$thisRestoreDBrootID]}/000.dir"
             errors=true
         fi
         dbrmFiles=$(ssh $REMOTE_USER@${restore_pmModuleIP[$moduleID]} "if [ -e ${restore_DBRoot[$thisRestoreDBrootID]}/systemFiles/dbrm/ ]; then ls -A ${restore_DBRoot[$thisRestoreDBrootID]}/systemFiles/dbrm/; fi;")
         for file in $dbrmFiles
         do
-            echo "ERROR: PM$moduleID: dbrm directory file found -- $file" >&2
+            printLog "ERROR: PM$moduleID: dbrm directory file found -- $file" >&2
             errors=true
         done
     done
 done
 
 if [ $errors == true ]; then
-    echo "ERROR: Table data was found. Cleanup the installation and rerun." >&2
-    exit 5
+    printLog "ERROR: Table data was found. Cleanup the installation and rerun." >&2
+    reportStatus 6
 fi
 }
 
@@ -753,7 +800,7 @@ do
     for process in $processes
     do
         if ssh $REMOTE_USER@${restore_umModuleIP[$moduleID]} pgrep -x "$process" > /dev/null; then
-            echo "ERROR: UM$moduleID ColumnStore process is running -- $process" >&2
+            printLog "ERROR: UM$moduleID ColumnStore process is running -- $process" >&2
             errors=true
         fi
     done
@@ -763,15 +810,15 @@ do
     for process in $processes
     do
         if ssh $REMOTE_USER@${restore_pmModuleIP[$moduleID]} pgrep -x "$process" > /dev/null; then
-            echo "ERROR: PM$moduleID ColumnStore process is running -- $process" >&2
+            printLog "ERROR: PM$moduleID ColumnStore process is running -- $process" >&2
             errors=true
         fi
     done
 done
 
 if [ $errors == true ]; then
-    echo "ERROR: System is still running please shutdown and rerun." >&2
-    exit 5
+    printLog "ERROR: System is still running please shutdown and rerun." >&2
+    reportStatus 7
 fi
 }
 
@@ -859,9 +906,7 @@ restoreUM
 ## restore PMs 
 restorePMs
 
-echo "All Modules restored from backup successfully."
-
-exit 0
+reportStatus 0
 
 }
 
@@ -870,5 +915,5 @@ exit 0
 ###############################################################################
 main
 
-exit 0
+reportStatus 0
 
