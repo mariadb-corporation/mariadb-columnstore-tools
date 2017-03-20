@@ -41,9 +41,9 @@ verbosePrint () {
 ## 255 - could not connect via passwordless ssh
 reportStatus () {
     if [ $1 != 0 ]; then
-        printLog "Backup Status: Failed"
+        printLog "Restore Status: Failed"
     else
-        printLog "Backup Status: Success"
+        printLog "Restore Status: Success"
     fi
     endTime=`date +%s`
     runtime=$(( $endTime - $startTime ))
