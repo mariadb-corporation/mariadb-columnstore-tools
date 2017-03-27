@@ -229,6 +229,10 @@ fi
 PM1=$1
 BACKUP_SERVER_LOCATION=$2
 
+if [ -d "$BACKUP_SERVER_LOCATION" ]; then
+  # Control will enter here if $DIRECTORY exists.
+fi
+
 ## setup rsync option lists
 rsyncCommand="rsync "
 rsyncOptions="-a "
@@ -468,7 +472,7 @@ measureDiskSpace () {
                 printLog "failed return from command: $command" >&2
                 reportStatus 3
             fi
-            if [ $PMwithUM == "yes" ]; then
+            if [ $PMwithUM == "y" ]; then
                 command="ssh $REMOTE_USER@${pmModuleIP[$moduleID]} du -s -b $INSTALL_DIR/mysql/db"
                 verbosePrint "$command"
                 commandReturn=$($command)
@@ -627,7 +631,7 @@ do
         # Launch it in background
         executeRsyncBackground $DRY_RUN /$dir/$pmBackupDir "--copy-links --link-dest=../backup.1/$pmBackupDir" $REMOTE_USER@${pmModuleIP[$moduleID]}:${DBRoot[$thisDBrootID]} $BACKUP_SERVER_LOCATION/$pmBackupDir
         
-        if [ $PMwithUM == "yes" ]; then
+        if [ $PMwithUM == "y" ]; then
             pmBackupDirDB="pm"$moduleID"DB"
             printLog "Backing up $pmBackupDir local query data"
             if [ ! -e $BACKUP_SERVER_LOCATION/$pmBackupDirDB ]; then
