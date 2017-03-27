@@ -721,7 +721,7 @@ do
         fi
     done
     waitRsyncBackground ${pmModuleBackupSize[$moduleID]} $moduleID $dir
-    if [ $PMwithUM == "y" ]; then
+    if [ $restore_PMwithUM == "y" ]; then
         pmBackupDirDB="pm"$moduleID"DB"
         if [ -e $BACKUP_SERVER_LOCATION/$pmBackupDirDB ]; then
             printLog "Restoring from $pmBackupDir local query data"
