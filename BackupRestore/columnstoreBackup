@@ -229,8 +229,9 @@ fi
 PM1=$1
 BACKUP_SERVER_LOCATION=$2
 
-if [ -d "$BACKUP_SERVER_LOCATION" ]; then
-  # Control will enter here if $DIRECTORY exists.
+if [ ! -d "$BACKUP_SERVER_LOCATION" ]; then
+    printLog "Directory $BACKUP_SERVER_LOCATION does not exist." >&2
+    reportStatus 1
 fi
 
 ## setup rsync option lists
