@@ -416,7 +416,7 @@ elif [ $restore_singleServerInstall == "y" ]; then
     restore_pmModuleIP[1]=$PM1
        
 else
-    printLog "Unknown install type = $installType" >&2
+    printLog "Unknown install type = $restore_singleServerInstall" >&2
     reportStatus 4
 fi
 

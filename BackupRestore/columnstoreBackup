@@ -445,7 +445,7 @@ elif [ $singleServerInstall == "y" ]; then
     pmModuleIP[1]=$PM1
        
 else
-    printLog "Unknown install type = $installType" >&2
+    printLog "Unknown install type = $singleServerInstall" >&2
     reportStatus 4
 fi
 
