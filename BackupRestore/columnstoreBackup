@@ -520,6 +520,10 @@ loopCount=0
 windowSize=5
 stallCount=0
 rsyncStalled=false
+if (( $sizeOfData <= 0 )); then
+    printLog "WARNING: Rsync data size reported as $sizeOfData" >&2
+    percentDone=100
+fi
 for (( winNum=0; winNum<$windowSize; winNum++ ))
 do
     transferDiffs[$winNum]=0
@@ -581,7 +585,7 @@ do
         rate=$averageDiffs" bits/second "
     fi
     
-    if (( $averageDiffs > 0 )); then   
+    if (( $averageDiffs > $sleepInt )); then   
         remainingSeconds=$(( $remainingCopy / $(( $averageDiffs / $sleepInt )) ))
         printHours=$(( $remainingSeconds / 3600 ))
         printMinutes=$(( $(( $remainingSeconds % 3600 )) / 60 ))
