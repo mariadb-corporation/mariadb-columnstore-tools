@@ -6,7 +6,7 @@
 # Argument 1 - Remote Server Host Name or IP address
 # Argument 2 - Remote Server root password
 # Argument 3 - Command
-set timeout 30
+set timeout 10
 set USERNAME $env(USER)"@"
 set SERVER [lindex $argv 0]
 set PASSWORD [lindex $argv 1]
@@ -39,6 +39,7 @@ expect {
 	"Connection closed"   { send_user "ERROR: Connection closed\n" ; exit 1 }
 	"word: " { send "$PASSWORD\n" }
 	"passphrase" { send "$PASSWORD\n" }
+        "scp:"   { send_user "FAILED\n" ; exit 1 }
 }
 expect {
 	"100%" 						{ send_user "DONE\n" ; exit 0 }
@@ -48,6 +49,5 @@ expect {
 	"Connection refused"   { send_user "ERROR: Connection refused\n" ; exit 1 }
 	"Connection closed"   { send_user "ERROR: Connection closed\n" ; exit 1 }
 }
-#sleep to make sure it's finished
 exit 0
 

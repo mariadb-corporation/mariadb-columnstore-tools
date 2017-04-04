@@ -25,7 +25,7 @@ if { $PASSWORD == "ssh" } {
 expect -re "# "
 send "scp $FILE $USERNAME$SERVER:$FILE\n"
 expect {
-        -re "100%"                      { send_user "DONE\n" ; exit 0 }
+        -re "100%"                      { send_user "DONE\n" ; sleep 2; exit 0 }
 	-re "authenticity" { send "yes\n" 
 						expect {
 							-re "word: " { send "$PASSWORD\n" }
@@ -42,7 +42,7 @@ expect {
 	-re "WARNING:" { send "rm -f /root/.ssh/known_hosts" ; exit 1 }
 }
 expect {
-	-re "100%" 			{ send_user "DONE\n" ; exit 0 }
+	-re "100%" 			{ send_user "DONE\n" ; sleep 2 ; exit 0 }
 	-re "scp:"  					{ send_user "FAILED\n" ; exit 1 }
 	-re "Permission denied"         { send_user "FAILED: Invalid password\n" ; exit 1 }
 	-re "No such file or directory" { send_user "FAILED: Invalid file\n" ; exit 1 }
@@ -50,6 +50,5 @@ expect {
 	-re "Connection closed"   { send_user "ERROR: Connection closed\n" ; exit 1 }
 }
 #sleep to make sure it's finished
-sleep 5
 exit 0
 
