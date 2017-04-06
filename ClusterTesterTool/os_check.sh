@@ -4,7 +4,6 @@
 
 OS=`uname -s`
 REV=`uname -r`
-MACH=`uname -m`
 
 GetVersionFromFile()
 {
@@ -25,7 +24,7 @@ elif [ "${OS}" = "Linux" ] ; then
         REV=`cat /etc/redhat-release | sed s/.*release\ // | sed s/\ .*//`
     elif [ -f /etc/SuSE-release ] ; then
         DIST=`cat /etc/SuSE-release | tr "\n" ' '| sed s/VERSION.*//`
-        REV=`cat /etc/SuSE-release | tr "\n" ' ' | sed s/.*=\ //`
+        REV=""
     elif [ -f /etc/mandrake-release ] ; then
         DIST='Mandrake'
         PSUEDONAME=`cat /etc/mandrake-release | sed s/.*\(// | sed s/\)//`
@@ -39,7 +38,7 @@ elif [ "${OS}" = "Linux" ] ; then
         DIST="${DIST}[`cat /etc/UnitedLinux-release | tr "\n" ' ' | sed s/VERSION.*//`]"
     fi
 
-    OSSTR="${OS} ${DIST} ${REV}(${PSUEDONAME} ${KERNEL} ${MACH})"
+    OSSTR="${OS} ${DIST} ${REV}"
 
 fi
 

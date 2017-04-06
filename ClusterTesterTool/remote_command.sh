@@ -33,7 +33,7 @@ if { $TTYOPT != "" } {
 }
 log_user $DEBUG
 spawn -noecho /bin/bash
-expect -re {[$#] }
+#expect -re {[$#] }
 
 if { $PASSWORD == "ssh" } {
 	set PASSWORD ""
@@ -42,7 +42,7 @@ if { $PASSWORD == "ssh" } {
 # 
 # send command
 #
-send "ssh $TTY $USERNAME@$SERVER '$COMMAND'\n"
+send "ssh -v $TTY $USERNAME@$SERVER '$COMMAND'\n"
 expect {
 	"cannot access" { exit 1}
 	"Host key verification failed" { send_user "FAILED: Host key verification failed\n" ; exit 1}
@@ -58,17 +58,25 @@ expect {
 						}
 	"word: " { send "$PASSWORD\n" }
 	"passphrase" { send "$PASSWORD\n" }
-	-re {[$#] } { exit 0 }
-	timeout { exit 1 }
+#	-re {[$#] } { exit 0 }
+	"Exit status 0" { exit 0 }
+        "Exit status 1" { exit 1 }
+	timeout { exit 2 }
+        "Permission denied, please try again"         { send_user "FAILED: Invalid password\n" ; exit 1 }
 }
 expect {
-	-re {[$#] } { exit 0 }
-	timeout { exit 1 }
+#	-re {[$#] } { exit 0 }
+        "Exit status 0" { exit 0 }
+        "Exit status 1" { exit 1 }
+	timeout { exit 2 }
         "cannot access" { exit 1}
-	"Permission denied" { send_user "           FAILED: Invalid password\n" ; exit 1 }
+        "Permission denied, please try again"         { send_user "FAILED: Invalid password\n" ; exit 1 }
+
 	"(y or n)"  { send "y\n" 
-				expect -re {[$#] } { exit 0 }
-				timeout { exit 1 }	
+				#expect -re {[$#] } { exit 0 }
+				"Exit status 0" { exit 0 }
+        			"Exit status 1" { exit 1 }
+				timeout { exit 2 }	
 	}
 }
 exit 0
