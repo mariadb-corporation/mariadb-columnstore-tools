@@ -74,7 +74,7 @@ helpPrint () {
 }
 
 # Parse command line options.
-while getopts hioupc:-: OPT; do
+while getopts hc-: OPT; do
     case "$OPT" in
         h)
             echo $USAGE
