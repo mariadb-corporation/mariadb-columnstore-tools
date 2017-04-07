@@ -38,13 +38,14 @@ checkContinue() {
 helpPrint () {
           ################################################################################
     echo ""
-    echo  "This is the MariaDB Columnstore Cluster System Test tool." 
+    echo  "This is the MariaDB ColumnStore Cluster System Test tool." 
     echo ""
     echo  "It will run a set of test to validate the setup of the MariaDB Columnstore system." 
-    echo  "This can be run prior to the install to make sure the servers/nodes" 
-    echo  "are configured properly. It should be run as the user of the planned install."
-    echo  "Meaning if MariaDB Columnstore is going to be installed as root user, then run"
-    echo  "from root user"
+    echo  "This can be run prior to the install of MariaDB ColumnStore to make sure the" 
+    echo  "servers/nodes are configured properly. It should be run as the user of the planned"
+    echo  "install. Meaning if MariaDB ColumnStore is going to be installed as root user,"
+    echo  "then run from root user. Also the assumption is that the servers/node have be"
+    echo  "setup based on the Preparing for ColumnStore Installation"
     echo ""
     echo "Additional information on Tool is documented at:"
     echo ""
@@ -58,7 +59,7 @@ helpPrint () {
     echo  "	Locale settings" 
     echo  "	Firewall settings" 
     echo  "	Dependent packages installed"
-    echo  "     For non-root user install - check permissions on /tmp and /dev/shm"
+    echo  "     For non-root user install - test permissions on /tmp and /dev/shm"
     echo ""
     echo  "Usage: $0 [options]" 
     echo "OPTIONS:"
@@ -90,7 +91,7 @@ while getopts hioupc:-: OPT; do
                     helpPrint
                     exit 0
                     ;;            
-		continue)
+		continue )
 		    CHECK=false
 		    ;;      
                 ipaddr=?* )  
@@ -113,6 +114,10 @@ while getopts hioupc:-: OPT; do
                 password* )  
                     echo "No arg for --$OPTARG option" >&2
                     exit 1
+                    ;;
+                continue* )
+                    echo "No arg allowed for --$OPTARG option" >&2
+                    exit 1 
                     ;;
                 help* )  
                     helpPrint
@@ -184,8 +189,8 @@ if [ "$USER" != "root" ]; then
   echo "** Run Non-root User directory permissions check on Local Node"
   echo ""
   
-  #remove any checl tmp files from previous runs
-  `sudo rm -f /tmp/*_check`
+  #remove any check tmp files from previous runs
+  `sudo rm -f /tmp/*_check > /dev/null 2>&1`
   
   #check /tmp and /dev/shm
   pass=true
@@ -242,6 +247,15 @@ if [ "$IPADDRESSES" != "" ]; then
       echo $ipadd " Node ${bold}Failed${normal} SSH login test, check password or ssh-key settings"
       exit 1
     fi
+  done
+
+  #
+  # remove old _check tmp files from remote servers
+  
+  `sudo rm -f /tmp/*_check > /dev/null 2>&1`
+  
+  for ipadd in "${NODE_IPADDRESS[@]}"; do
+    `./remote_command.sh $ipadd $PASSWORD 'sudo rm -f /tmp/*_check > /dev/null 2>&1' 1 > /tmp/remote_command_check 2>&1`
   done
 
   if [ "$USER" != "root" ]; then
@@ -308,7 +322,7 @@ if [ "$IPADDRESSES" != "" ]; then
     if [ "$?" -ne 0 ]; then
       echo "Error running remote_scp_put.sh to $ipadd Node, check /tmp/remote_scp_put_check"
     else
-      `./remote_command.sh $ipadd $PASSWORD './os_check.sh > /tmp/os_check 2>&1' > /tmp/remote_command_check`
+      `./remote_command.sh $ipadd $PASSWORD './os_check.sh > /tmp/os_check 2>&1' 1 > /tmp/remote_command_check`
       rc="$?"
       if  [ $rc -eq 0 ] || ( [ $rc -eq 2 ] && [ $OS == "suse12" ] ) ; then
 	`./remote_scp_get.sh $ipadd $PASSWORD /tmp/os_check > /tmp/remote_scp_get_check 2>&1`
@@ -728,7 +742,7 @@ if [ $OS == "suse12" ]; then
   if [ "$IPADDRESSES" != "" ]; then
     for ipadd in "${NODE_IPADDRESS[@]}"; do
       for PKG in "${SUSE_PKG[@]}"; do
-	`./remote_command.sh $ipadd $PASSWORD 'rpm -qi "$PKG" > /tmp/pkg_check 2>&1' 1 > /tmp/remote_command_check 2>&1`
+	`./remote_command.sh $ipadd $PASSWORD "rpm -qi '$PKG' > /tmp/pkg_check 2>&1" 1 > /tmp/remote_command_check 2>&1`
 	rc="$?"
 	if  [ $rc -eq 0 ] || ( [ $rc -eq 2 ] && [ $OS == "suse12" ] ) ; then
 	  `./remote_scp_get.sh $ipadd $PASSWORD /tmp/pkg_check > /tmp/remote_scp_get_check 2>&1`
