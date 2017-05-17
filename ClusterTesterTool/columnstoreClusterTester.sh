@@ -59,7 +59,7 @@ helpPrint () {
     echo  "	Locale settings" 
     echo  "	Firewall settings" 
     echo  "	Dependent packages installed"
-    echo  "	For non-root user install - test permissions on /tmp and /dev/shm"
+    echo  "     For non-root user install - test permissions on /tmp and /dev/shm"
     echo ""
     echo  "Usage: $0 [options]" 
     echo "OPTIONS:"
