@@ -3,11 +3,11 @@
 bold=$(tput bold)
 normal=$(tput sgr0)
 
-
 IPADDRESSES=""
-OS="centos7"
+OS=""
 PASSWORD="ssh"
 CHECK=true
+REPORTPASS=true
 
 OS_LIST=("centos6" "centos7" "debian8" "suse12" "ubuntu16")
 
@@ -45,7 +45,10 @@ helpPrint () {
     echo  "servers/nodes are configured properly. It should be run as the user of the planned"
     echo  "install. Meaning if MariaDB ColumnStore is going to be installed as root user,"
     echo  "then run from root user. Also the assumption is that the servers/node have be"
-    echo  "setup based on the Preparing for ColumnStore Installation"
+    echo  "setup based on the Preparing for ColumnStore Installation."
+    echo  "It should also be run on the server that is designated as Performance Module #1."
+    echo  "This is the same server where the MariaDB ColumnStore package would be installed"
+    echo  " and where the install script would be executed from, postConfigure."
     echo ""
     echo "Additional information on Tool is documented at:"
     echo ""
@@ -57,17 +60,20 @@ helpPrint () {
     echo  "	ColumnStore Port test"
     echo  "	OS version" 
     echo  "	Locale settings" 
-    echo  "	Firewall settings" 
+    echo  "	Firewall settings"
+    echo  "     Date/time settings"
     echo  "	Dependent packages installed"
     echo  "     For non-root user install - test permissions on /tmp and /dev/shm"
     echo ""
     echo  "Usage: $0 [options]" 
     echo "OPTIONS:"
     echo  "   -h,--help			Help" 
-    echo  "   --ipaddr=[ipaddresses]	Remote Node IP Addresses, if not provide, will only check local node" 
-    echo  "   --os=[os]			Change OS Version (centos6, centos7, debian8, suse12, ubuntu16). (Default is centos7)" 
+    echo  "   --ipaddr=[ipaddresses]	Remote Node IP-Addresses/Hostnames, if not provide, will only check local node"
+    echo  "                             examples: 192.168.1.1,192.168.1.2 or serverum1,serverpm2"
+    echo  "   --os=[os]			Optional: Set OS Version (centos6, centos7, debian8, suse12, ubuntu16)" 
     echo  "   --password=[password]	Provide a user password. (Default: ssh-keys setup will be assumed)" 
     echo  "   -c,--continue		Continue on failures"
+    echo  "   --logfile=[fileName] 	Output results to a log file"
     echo ""
     echo  "NOTE: Dependent package : 'nmap' and 'expect' packages need to be installed locally" 
     echo ""
@@ -103,6 +109,11 @@ while getopts hc-: OPT; do
                 password=?* )
                     PASSWORD="$LONG_OPTARG"
                     ;;
+                logfile=?* )
+                    LOGFILE="$LONG_OPTARG"
+                    exec 1<>$LOGFILE
+                    exec 2>&1
+                    ;;
                 ipaddr* )  
                     echo "No arg for --$OPTARG option" >&2
                     exit 1
@@ -119,7 +130,11 @@ while getopts hc-: OPT; do
                     echo "No arg allowed for --$OPTARG option" >&2
                     exit 1 
                     ;;
-                help* )  
+                logfile* )  
+                    echo "No arg for --$OPTARG option" >&2
+                    exit 1
+                    ;;
+                 help* )  
                     helpPrint
                     exit 0
                     ;;                                        
@@ -142,25 +157,6 @@ done
 # Remove the switches we parsed above.
 shift `expr $OPTIND - 1`
 
-match=false
-for SUPPORTED_OS in "${OS_LIST[@]}"; do
-  if [ "$OS" = "$SUPPORTED_OS" ] ; then
-    match=true;
-    break
-  fi
-done
-
-if ! $match ; then
-  echo ""
-  echo "$OS is not supported, enter one of the following OS's"
-  echo ""
-  for SUPPORTED_OS in "${OS_LIST[@]}"; do
-    echo "$SUPPORTED_OS"
-  done
-  echo ""
-  exit 1
-fi
-
 if [ "$IPADDRESSES" != "" ]; then
   #parse IP Addresses into an array
   IFS=','
@@ -175,63 +171,132 @@ if [ "$IPADDRESSES" != "" ]; then
       echo "nmap is not installed. Please install and rerun."
       exit 1
   fi
-fi
+fi  
 
-echo ""  
-echo "*** This is the MariaDB Columnstore Cluster System test tool ***"
-echo ""
-
-
-if [ "$USER" != "root" ]; then
-  # Non-root User directory permissions check
-  #
+checkLocalOS()
+{
   echo ""
-  echo "** Run Non-root User directory permissions check on Local Node"
+  echo "** Validate local OS is supported"
   echo ""
-  
-  #remove any check tmp files from previous runs
-  `sudo rm -f /tmp/*_check > /dev/null 2>&1`
-  
-  #check /tmp and /dev/shm
-  pass=true
-  `touch /tmp/cs_check > /dev/null 2>&1`
+
+  #get local OS
+  `./os_check.sh > /tmp/os_check 2>&1`
   if [ "$?" -eq 0 ]; then
-    echo "Local Node permission test on /tmp : Passed"
-    `rm -f /tmp/cs_check`
+    localOS=`cat /tmp/os_check`
+    echo "Local Node OS Version : $localOS"
+    `cat /tmp/os_check | grep -i ubuntu > /dev/null 2>&1`
+    if [ $? -eq 0 ] ; then
+      OS="ubunt16"
+    else
+      `cat /tmp/os_check | grep -i debian > /dev/null 2>&1`
+      if [ $? -eq 0 ] ; then
+	OS="debian8"
+      else
+	`cat /tmp/os_check | grep -i suse > /dev/null 2>&1`
+	if [ $? -eq 0 ] ; then
+	  OS="suse12"
+	else
+	  `cat /tmp/os_check | grep -i centos > /dev/null 2>&1`
+	  if [ $? -eq 0 ] ; then
+	    if [ `which systemctl 2>/dev/null` ] ; then
+	      OS="centos7"
+	    else
+	      OS="centos6"
+	    fi
+	  else
+	    if [ $OS == "" ] ;then
+	      echo "OS type could not be determined from the os_check.sh script, provide the OS in the command line --os"
+	      exit 1
+	  fi
+	fi
+      fi
+    fi
   else
-    echo "Local Node permission test on /tmp : ${bold}Failed${normal}, change permissions to 777 and re-test"
+    echo "Error running os_check.sh on local node, please re-run and provide the OS in the command line --os"
     exit 1
   fi
 
-  `touch /dev/shm/cs_check > /dev/null 2>&1`
-  if [ "$?" -eq 0 ]; then
-    echo "Local Node permission test on /dev/shm : Passed"
-    `rm -f /dev/shm/cs_check`
-  else
-    echo "Local Node permission test on /dev/shm : ${bold}Failed${normal}, change permissions to 777 and re-test"
-    pass=false
-  fi
-fi
-
-# run the remote node valdiation test
-if [ "$IPADDRESSES" != "" ]; then
-  # ping test
-  #
-  echo ""
-  echo "** Run Ping access Test to remote nodes"
-  echo ""
-
-  for ipadd in "${NODE_IPADDRESS[@]}"; do
-
-    `ping $ipadd -c 1 -w 5 > /dev/null 2>&1`
-    if [ "$?" -eq 0 ]; then
-      echo $ipadd " Node Passed ping test"
-    else
-      echo $ipadd " Node ${bold}Failed${normal} ping test, correct and retest"
-      exit 1
+  match=false
+  for SUPPORTED_OS in "${OS_LIST[@]}"; do
+    if [ "$OS" = "$SUPPORTED_OS" ] ; then
+      match=true;
+      break
     fi
   done
 
+  if ! $match ; then
+    echo ""
+    echo "Failed: $OS is not supported, enter one of the following OS's"
+    echo ""
+    for SUPPORTED_OS in "${OS_LIST[@]}"; do
+      echo "$SUPPORTED_OS"
+    done
+    echo ""
+    exit 1
+  else
+    echo ""
+    echo "Passed: Local OS is supported"
+    echo ""
+  fi
+}
+  
+checkLocalDir()
+{
+    if [ "$USER" != "root" ]; then
+      # Non-root User directory permissions check
+      #
+      echo ""
+      echo "** Run Non-root User directory permissions check on Local Node"
+      echo ""
+      
+      #remove any check tmp files from previous runs
+      `sudo rm -f /tmp/*_check > /dev/null 2>&1`
+      
+      #check /tmp and /dev/shm
+      pass=true
+      `touch /tmp/cs_check > /dev/null 2>&1`
+      if [ "$?" -eq 0 ]; then
+	echo "Local Node permission test on /tmp : Passed"
+	`rm -f /tmp/cs_check`
+      else
+	echo "Local Node permission test on /tmp : ${bold}Failed${normal}, change permissions to 777 and re-test"
+	exit 1
+      fi
+
+      `touch /dev/shm/cs_check > /dev/null 2>&1`
+      if [ "$?" -eq 0 ]; then
+	echo "Local Node permission test on /dev/shm : Passed"
+	`rm -f /dev/shm/cs_check`
+      else
+	echo "Local Node permission test on /dev/shm : ${bold}Failed${normal}, change permissions to 777 and re-test"
+	pass=false
+	REPORTPASS=false
+      fi
+    fi
+}
+
+checkPing()
+{
+    # ping test
+    #
+    echo ""
+    echo "** Run Ping access Test to remote nodes"
+    echo ""
+
+    for ipadd in "${NODE_IPADDRESS[@]}"; do
+
+      `ping $ipadd -c 1 -w 5 > /dev/null 2>&1`
+      if [ "$?" -eq 0 ]; then
+	echo $ipadd " Node Passed ping test"
+      else
+	echo $ipadd " Node ${bold}Failed${normal} ping test, correct and retest"
+	exit 1
+      fi
+    done
+}
+
+checkSSH()
+{
   # Login test
   #
   echo ""
@@ -242,13 +307,24 @@ if [ "$IPADDRESSES" != "" ]; then
     `./remote_command.sh $ipadd $PASSWORD ls 1 > /dev/null 2>&1`;
     rc="$?"
     if  [ $rc -eq 0 ] || ( [ $rc -eq 2 ] && [ $OS == "suse12" ] ) ; then
-      echo $ipadd " Node Passed SSH login test"
+      if [ $PASSWORD == "ssh" ] ; then
+	echo $ipadd " Node Passed SSH login test using ssh-keys"
+      else
+	echo $ipadd " Node Passed SSH login test using user password"
+      fi
     else
-      echo $ipadd " Node ${bold}Failed${normal} SSH login test, check password or ssh-key settings"
+      if [ $PASSWORD == "ssh" ] ; then
+	echo $ipadd " Node ${bold}Failed${normal} SSH login test using ssh-keys"
+      else
+	echo $ipadd " Node ${bold}Failed${normal} SSH login test using user password"
+      fi
       exit 1
     fi
   done
+}
 
+checkRemoteDir()
+{
   #
   # remove old _check tmp files from remote servers
   
@@ -279,6 +355,7 @@ if [ "$IPADDRESSES" != "" ]; then
       else
 	  echo "Error running remote_command.sh to $ipadd Node, check /tmp/remote_command_check"
 	  pass=false
+	  REPORTPASS=false
       fi
 
       `./remote_command.sh $ipadd $PASSWORD 'touch /dev/shm/cs_check' 1 > /tmp/remote_command_check 2>&1`
@@ -288,12 +365,14 @@ if [ "$IPADDRESSES" != "" ]; then
 	if [ "$?" -eq 0 ]; then
 	  echo "$ipadd Node permission test on /dev/shm : ${bold}Failed${normal}, change permissions to 777 and re-test"
 	  pass=false
+	  REPORTPASS=false
 	else
 	  echo "$ipadd Node permission test on /dev/shm : Passed"
 	fi
       else
 	echo "Error running remote_command.sh to $ipadd Node, check /tmp/remote_command_check"
 	pass=false
+	REPORTPASS=false
       fi
     done
     
@@ -301,20 +380,18 @@ if [ "$IPADDRESSES" != "" ]; then
       checkContinue
     fi
   fi
-  
+}
+
+checkOS()
+{
   # Os check
   #
   echo ""
   echo "** Run OS check - OS version needs to be the same on all nodes"
   echo ""
-  
-  #get local OS
-  `./os_check.sh > /tmp/os_check 2>&1`
-  if [ "$?" -eq 0 ]; then
-    echo "Local Node OS Version : `cat /tmp/os_check`"
-  else
-    echo "Error running os_check.sh on local node"
-  fi
+
+  echo "Local Node OS Version : $localOS"
+  echo ""
   
   pass=true
   for ipadd in "${NODE_IPADDRESS[@]}"; do
@@ -329,17 +406,19 @@ if [ "$IPADDRESSES" != "" ]; then
 	if [ "$?" -ne 0 ]; then
 	  echo "Error running remote_scp_get.sh to $ipadd Node, check /tmp/remote_scp_get_check"
 	else
-	  echo "$ipadd Node OS Version : `cat os_check`"
-	  `diff /tmp/os_check os_check > /dev/null 2>&1`
-	  if [ "$?" -ne 0 ]; then
+	  remoteOS=`cat os_check`
+	  echo "$ipadd Node OS Version : $remoteOS"
+	  if [ $localOS != $remoteOS ]; then
 	    echo "${bold}Failed${normal}, $ipadd has a different OS than local node"
 	    pass=false
+	    REPORTPASS=false
 	  fi
-	  `rm -f os_check`
+	  rm -f os_check
 	fi
       else
 	echo "Error running remote_command.sh to $ipadd Node, check /tmp/remote_command_check"
 	pass=false
+	REPORTPASS=false
       fi
     fi
   done
@@ -347,7 +426,10 @@ if [ "$IPADDRESSES" != "" ]; then
   if ! $pass; then
     checkContinue
   fi
+}
 
+checkLocale()
+{
   # Locale check
   #
   echo ""
@@ -376,19 +458,24 @@ if [ "$IPADDRESSES" != "" ]; then
 	if [ "$?" -ne 0 ]; then
 	  echo "${bold}Failed${normal}, $ipadd has a different Locale setting than local node"
 	  pass=false
+	  REPORTPASS=false
 	fi
 	`rm -f locale_check`
       fi
     else
       echo "Error running remote_command.sh to $ipadd Node, check /tmp/remote_command_check"
       pass=false
+      REPORTPASS=false
     fi
   done
   
   if ! $pass; then
     checkContinue
   fi
+}
 
+checkSELINUX()
+{
   # SELINUX check
   #
   echo ""
@@ -402,6 +489,7 @@ if [ "$IPADDRESSES" != "" ]; then
     if [ "$?" -eq 0 ]; then
       echo "${bold}Failed${normal}, Local Node SELINUX setting is Enabled, please disable"
       pass=false
+      REPORTPASS=false
     else
       echo "Local Node SELINUX setting is Not Enabled"
     fi
@@ -418,6 +506,7 @@ if [ "$IPADDRESSES" != "" ]; then
     if [ "$?" -eq 0 ]; then
       echo "${bold}Failed${normal}, $ipadd SELINUX setting is Enabled, please disable"
       pass=false
+      REPORTPASS=false
     else
       echo "$ipadd Node SELINUX setting is Not Enabled"
     fi
@@ -428,7 +517,10 @@ if [ "$IPADDRESSES" != "" ]; then
   if ! $pass; then
     checkContinue
   fi
+}
 
+checkFirewalls()
+{
   # FIREWALL checks
   #
   echo ""
@@ -447,6 +539,7 @@ if [ "$IPADDRESSES" != "" ]; then
       echo "${bold}Failed${normal}, Local Node $firewall service is Enabled in chkconfig, please disable"
       pass=false
       fpass=false
+      REPORTPASS=false
     fi
 
     `systemctl status $firewall > /tmp/firewall1_check 2>&1`
@@ -455,6 +548,7 @@ if [ "$IPADDRESSES" != "" ]; then
       echo "${bold}Failed${normal}, Local Node $firewall service is Enabled in systemctl, please disable"
       pass=false
       fpass=false
+      REPORTPASS=false
     fi
 
     if $pass ; then
@@ -483,6 +577,7 @@ if [ "$IPADDRESSES" != "" ]; then
 	      echo "${bold}Failed${normal}, $ipadd Node $firewall service is Enabled in chkconfig, please disable"
 	      pass=false
 	      fpass=false
+	      REPORTPASS=false
 	    fi
 
 	    `./remote_command.sh $ipadd $PASSWORD "systemctl status '$firewall' > /tmp/firewall1_check 2>&1" > /tmp/remote_command_check`
@@ -497,6 +592,7 @@ if [ "$IPADDRESSES" != "" ]; then
 		  echo "${bold}Failed${normal}, $ipadd Node $firewall service is Enabled in systemctl, please disable"
 		  pass=false
 		  fpass=false
+		  REPORTPASS=false
 		fi
 		`rm -f firewall1_check`
 	      fi
@@ -525,6 +621,7 @@ if [ "$IPADDRESSES" != "" ]; then
 	      echo "${bold}Failed${normal}, $ipadd Node $firewall service is Enabled in systemctl, please disable"
 	      pass=false
 	      fpass=false
+	      REPORTPASS=false
 	    fi
 	    `rm -f firewall1_check`
 	    
@@ -561,6 +658,7 @@ if [ "$IPADDRESSES" != "" ]; then
     if [ "$?" -eq 0 ]; then
       echo "${bold}Failed${normal}, Local Node rcSuSEfirewall2 service is Enabled, please disable"
       pass=false
+      REPORTPASS=false
     else
       echo "Local Node rcSuSEfirewall2 service is Not Enabled"
     fi
@@ -577,6 +675,7 @@ if [ "$IPADDRESSES" != "" ]; then
 	  if [ "$?" -eq 0 ]; then
 	    echo "${bold}Failed${normal}, $ipadd Node rcSuSEfirewall2 service is Enabled, please disable"
 	    pass=false
+	    REPORTPASS=false
 	  else
 	    echo "$ipadd Node rcSuSEfirewall2 service is Not Enabled"
 	  fi
@@ -585,6 +684,7 @@ if [ "$IPADDRESSES" != "" ]; then
       else
 	echo "Error running remote_command.sh to $ipadd Node, check /tmp/remote_command_check"
 	pass=false
+	REPORTPASS=false
       fi
     done
 
@@ -592,7 +692,10 @@ if [ "$IPADDRESSES" != "" ]; then
       checkContinue
     fi
   fi
-  
+}
+
+checkPorts()
+{
   # port test
   #
   echo ""
@@ -608,320 +711,339 @@ if [ "$IPADDRESSES" != "" ]; then
     else
       echo $ipadd " Node ${bold}Failed${normal} port test, check and disable any firwalls that were reported enabled"
       pass=false
+      REPORTPASS=false
     fi
   done
 
   if ! $pass; then
     checkContinue
   fi
+}
 
-fi
-
-#
-# now check packaging on local and remote nodes
-#
-
-echo ""
-echo "** Run MariaDB ColumnStore Dependent Package Check"
-echo ""
-
-declare -a CENTOS_PKG=("boost" "expect" "perl" "perl-DBI" "openssl" "zlib" "file" "sudo" "perl-DBD-MySQL" "libaio" "rsync" "snappy" "net-tools")
-
-if [ $OS == "centos6" ] || [ $OS == "centos7" ]; then
+checkTime()
+{
+  # Time check
+  #
+  echo ""
+  echo "** Run Date/Time check - Date/Time should be within 10 seconds on all nodes"
+  echo ""
+  
   pass=true
-  #check centos packages on local node
-  for PKG in "${CENTOS_PKG[@]}"; do
-    if [ $OS == "centos6" ] && [ "$PKG" == "boost" ]; then
-      `ls /usr/lib/libboost_regex.so > /dev/null 2>&1`
-      if [ "$?" -ne 0 ]; then
-	echo "${bold}Failed${normal}, Local Node ${bold}boost libraries${normal} not installed"
-	pass=false
-      fi
-    else
-      `yum list installed "$PKG" > /tmp/pkg_check 2>&1`
-      `cat /tmp/pkg_check | grep 'command not found' > /dev/null 2>&1`
-      if [ "$?" -eq 0 ]; then
-	echo "${bold}Failed${normal}, Local Node ${bold}yum${normal} package not installed"
-	pass=false
-	break
+  #get local epoch time
+  localTime=`date +'%s'`
+  for ipadd in "${NODE_IPADDRESS[@]}"; do
+     `./remote_command.sh $ipadd $PASSWORD 'date +"%s" > /tmp/time_check' > /tmp/time_check`
+      rc="$?"
+      if  [ $rc -ne 0 ] ; then
+	  echo $ipadd " Node ${bold}Failed${normal} date/time check failed, check /tmp/time_check"
+	  pass=false
+	  REPORTPASS=false
       else
-	`cat /tmp/pkg_check | grep Installed > /dev/null 2>&1`
+	`./remote_scp_get.sh $ipadd $PASSWORD /tmp/time_check > /tmp/remote_scp_get_check 2>&1`
+	if [ "$?" -ne 0 ]; then
+	  echo "Error running remote_scp_get.sh to $ipadd Node, check /tmp/remote_scp_get_check"
+	else
+	  remoteTime=`cat time_check`
+	  timeDiff=`echo "$(($remoteTime-$localTime))"`
+	  range=10
+	  if [ $timeDiff -gt $range ] || [ $timeDiff -lt -$range ] ; then
+	    echo $ipadd " Node ${bold}Failed${normal}, $ipadd Node date/time is more than 10 seconds away from local node"
+	  else
+	    echo "Passed: $ipadd Node date/time is within 10 seconds of local node"
+	    fi
+	fi  
+      fi
+  done
+  `rm -f time_check`
+
+  if ! $pass; then
+    checkContinue
+  fi
+}
+
+checkPackages()
+{
+  #
+  # now check packaging on local and remote nodes
+  #
+
+  echo ""
+  echo "** Run MariaDB ColumnStore Dependent Package Check"
+  echo ""
+
+  declare -a CENTOS_PKG=("boost" "expect" "perl" "perl-DBI" "openssl" "zlib" "file" "sudo" "perl-DBD-MySQL" "libaio" "rsync" "snappy" "net-tools")
+
+  if [ $OS == "centos6" ] || [ $OS == "centos7" ]; then
+    if [ ! `which yum 2>/dev/null` ] ; then
+      echo "${bold}Failed${normal}, Local Node ${bold}yum${normal} package not installed"
+      pass=false
+      REPORTPASS=false
+    else
+      pass=true
+      #check centos packages on local node
+      for PKG in "${CENTOS_PKG[@]}"; do
+	if [ $OS == "centos6" ] && [ "$PKG" == "boost" ]; then
+	  `ls /usr/lib/libboost_regex.so > /dev/null 2>&1`
+	  if [ "$?" -ne 0 ]; then
+	    echo "${bold}Failed${normal}, Local Node ${bold}boost libraries${normal} not installed"
+	    pass=false
+	    REPORTPASS=false
+	  fi
+	else
+	  `yum list installed "$PKG" > /tmp/pkg_check 2>&1`
+	  `cat /tmp/pkg_check | grep Installed > /dev/null 2>&1`
+	  if [ "$?" -ne 0 ]; then
+	    echo "${bold}Failed${normal}, Local Node package ${bold}${PKG}${normal} is not installed, please install"
+	    pass=false
+	    REPORTPASS=false
+	  fi
+	fi
+      done
+    fi
+
+    if $pass; then
+      echo "Local Node - Passed, all dependency packages are installed"
+    else
+      checkContinue
+    fi
+
+    echo ""
+    pass=true
+    if [ "$IPADDRESSES" != "" ]; then
+      for ipadd in "${NODE_IPADDRESS[@]}"; do
+	for PKG in "${CENTOS_PKG[@]}"; do
+	  if [ $OS == "centos6" ] && [ $PKG == "boost" ]; then
+	    `./remote_command.sh $ipadd $PASSWORD 'ls /usr/lib/libboost_regex.so > /dev/null 2>&1' 1 > /tmp/remote_command_check 2>&1`
+	    if  [ $? -ne 0 ] ; then
+	      echo "${bold}Failed${normal}, $ipadd Node ${bold}boost libraries${normal} not installed"
+	      pass=false
+	      REPORTPASS=false
+	    fi
+	  else
+	    `./remote_command.sh $ipadd $PASSWORD "yum list installed '$PKG' > /tmp/pkg_check 2>&1" 1 > /tmp/remote_command_check 2>&1`
+	    rc="$?"
+	    if  [ $rc -eq 0 ] ; then
+	      `./remote_scp_get.sh $ipadd $PASSWORD /tmp/pkg_check > /tmp/remote_scp_get_check 2>&1`
+		if [ "$?" -ne 0 ]; then
+		  echo "Error running remote_scp_get.sh to $ipadd Node, check /tmp/remote_scp_get_check"
+		else
+		  `cat pkg_check | grep 'command not found' > /dev/null 2>&1`
+		  if [ "$?" -eq 0 ]; then
+		    echo "${bold}Failed${normal}, $ipadd Node ${bold}yum${normal} package not installed"
+		    pass=false
+		    REPORTPASS=false
+		    break
+		  else
+		    `cat pkg_check | grep Installed > /dev/null 2>&1`
+		    if [ "$?" -ne 0 ]; then
+		      echo "${bold}Failed${normal}, $ipadd Node package ${bold}${PKG}${normal} is not installed, please install"
+		      pass=false
+		      REPORTPASS=false
+		    fi
+		  `rm -f pkg_check`
+		fi
+	      fi
+	    else
+	      echo "${bold}Failed${normal}, $ipadd Node, 'yum' not installed"
+	      pass=false
+	      REPORTPASS=false
+	      break
+	    fi
+	  fi
+	done
+	
+	if $pass; then
+	  echo "$ipadd Node - Passed, all dependency packages are installed"
+	else
+	  checkContinue
+	fi
+	echo ""
+      done
+    fi
+  fi
+
+  declare -a SUSE_PKG=("boost-devel" "expect" "perl" "perl-DBI" "openssl" "file" "sudo" "libaio1" "rsync" "libsnappy1" "net-tools")
+
+  if [ $OS == "suse12" ]; then
+    if [ ! `which rpm 2>/dev/null` ] ; then
+      echo "${bold}Failed${normal}, Local Node ${bold}rpm${normal} package not installed"
+      pass=false
+      REPORTPASS=false
+    else
+      pass=true
+      #check centos packages on local node
+      for PKG in "${SUSE_PKG[@]}"; do
+	`rpm -qi "$PKG" > /tmp/pkg_check 2>&1`
+	`cat /tmp/pkg_check | grep "not installed" > /dev/null 2>&1`
+	if [ "$?" -eq 0 ]; then
+	  echo "${bold}Failed${normal}, Local Node package ${bold}${PKG}${normal} is not installed, please install"
+	  pass=false
+	  REPORTPASS=false
+	fi
+      done
+
+      if $pass; then
+	echo "Local Node - Passed, all dependency packages are installed"
+      else
+	checkContinue
+      fi
+    fi
+    
+    echo ""
+    pass=true
+    if [ "$IPADDRESSES" != "" ]; then
+      for ipadd in "${NODE_IPADDRESS[@]}"; do
+	for PKG in "${SUSE_PKG[@]}"; do
+	  `./remote_command.sh $ipadd $PASSWORD "rpm -qi '$PKG' > /tmp/pkg_check 2>&1" 1 > /tmp/remote_command_check 2>&1`
+	  rc="$?"
+	  if  [ $rc -ne 0 ] ; then
+	    echo "${bold}Failed${normal}, $ipadd Node package ${bold}${PKG}${normal} is not installed, please install"
+	    pass=false
+	    REPORTPASS=false
+	  fi
+	done
+	
+	if $pass; then
+	  echo "$ipadd Node - Passed, all dependency packages are installed"
+	else
+	  checkContinue
+	fi
+	echo ""
+      done
+    fi
+  fi  
+
+  declare -a UBUNTU_PKG=("libboost-all-dev" "expect" "libdbi-perl" "perl" "openssl" "libreadline-dev" "rsync" "snappy" "net-tools")
+
+  if [ $OS == "ubuntu16" ] ; then
+    if [ ! `which dpkg 2>/dev/null` ] ; then
+      echo "${bold}Failed${normal}, Local Node ${bold}rpm${normal} package not installed"
+      pass=false
+      REPORTPASS=false
+    else
+      pass=true
+      #check centos packages on local node
+      for PKG in "${UBUNTU_PKG[@]}"; do
+	`dpkg -s "$PKG" > /tmp/pkg_check 2>&1`
+	`cat /tmp/pkg_check | grep 'install ok installed' > /dev/null 2>&1`
 	if [ "$?" -ne 0 ]; then
 	  echo "${bold}Failed${normal}, Local Node package ${bold}${PKG}${normal} is not installed, please install"
 	  pass=false
+	  REPORTPASS=false
 	fi
+      done
+
+      if $pass; then
+	echo "Local Node - Passed, all dependency packages are installed"
+      else
+	checkContinue
       fi
     fi
-  done
-
-  if $pass; then
-    echo "Local Node - Passed, all dependency packages are installed"
-  else
-    checkContinue
-  fi
-
-  echo ""
-  pass=true
-  if [ "$IPADDRESSES" != "" ]; then
-    for ipadd in "${NODE_IPADDRESS[@]}"; do
-      for PKG in "${CENTOS_PKG[@]}"; do
-	if [ $OS == "centos6" ] && [ $PKG == "boost" ]; then
-	  `./remote_command.sh $ipadd $PASSWORD 'ls /usr/lib/libboost_regex.so > /dev/null 2>&1' 1 > /tmp/remote_command_check 2>&1`
-	  if  [ $? -ne 0 ] ; then
-	    echo "${bold}Failed${normal}, $ipadd Node ${bold}boost libraries${normal} not installed"
-	    pass=false
-	  fi
-	else
-	  `./remote_command.sh $ipadd $PASSWORD "yum list installed '$PKG' > /tmp/pkg_check 2>&1" 1 > /tmp/remote_command_check 2>&1`
+    
+    echo ""
+    pass=true
+    if [ "$IPADDRESSES" != "" ]; then
+      for ipadd in "${NODE_IPADDRESS[@]}"; do
+	for PKG in "${UBUNTU_PKG[@]}"; do
+	  `./remote_command.sh $ipadd $PASSWORD "dpkg -s '$PKG' > /tmp/pkg_check 2>&1" 1 > /tmp/remote_command_check 2>&1`
 	  rc="$?"
-	  if  [ $rc -eq 0 ] || ( [ $rc -eq 2 ] && [ $OS == "suse12" ] ) ; then
-	    `./remote_scp_get.sh $ipadd $PASSWORD /tmp/pkg_check > /tmp/remote_scp_get_check 2>&1`
-	      if [ "$?" -ne 0 ]; then
-		echo "Error running remote_scp_get.sh to $ipadd Node, check /tmp/remote_scp_get_check"
-	      else
-		`cat pkg_check | grep 'command not found' > /dev/null 2>&1`
-		if [ "$?" -eq 0 ]; then
-		  echo "${bold}Failed${normal}, $ipadd Node ${bold}yum${normal} package not installed"
-		  pass=false
-		  break
-		else
-		  `cat pkg_check | grep Installed > /dev/null 2>&1`
-		  if [ "$?" -ne 0 ]; then
-		    echo "${bold}Failed${normal}, $ipadd Node package ${bold}${PKG}${normal} is not installed, please install"
-		    pass=false
-		  fi
-		`rm -f pkg_check`
-	      fi
-	    fi
-	  else
-	    echo "Error running remote_command.sh to $ipadd Node, check /tmp/remote_command_check"
+	  if  [ $rc -ne 0 ] ; then
+	    echo "${bold}Failed${normal}, $ipadd Node package ${bold}${PKG}${normal} is not installed, please install"
 	    pass=false
+	    REPORTPASS=false
 	  fi
-	fi
-      done
-      
-      if $pass; then
-	echo "$ipadd Node - Passed, all dependency packages are installed"
-      else
-	checkContinue
-      fi
-      echo ""
-    done
-  fi
-fi
-
-declare -a SUSE_PKG=("boost-devel" "expect" "perl" "perl-DBI" "openssl" "file" "sudo" "libaio1" "rsync" "libsnappy1" "net-tools")
-
-if [ $OS == "suse12" ]; then
-  pass=true
-  #check centos packages on local node
-  for PKG in "${SUSE_PKG[@]}"; do
-    `rpm -qi "$PKG" > /tmp/pkg_check 2>&1`
-    `cat /tmp/pkg_check | grep 'command not found' > /dev/null 2>&1`
-    if [ "$?" -eq 0 ]; then
-      echo "${bold}Failed${normal}, Local Node ${bold}zypper${normal} package not installed"
-      pass=false
-      break
-    else
-      `cat /tmp/pkg_check | grep "not installed" > /dev/null 2>&1`
-      if [ "$?" -eq 0 ]; then
-	echo "${bold}Failed${normal}, Local Node package ${bold}${PKG}${normal} is not installed, please install"
-	pass=false
-      fi
-    fi
-  done
-
-  if $pass; then
-    echo "Local Node - Passed, all dependency packages are installed"
-  else
-    checkContinue
-  fi
-
-  echo ""
-  pass=true
-  if [ "$IPADDRESSES" != "" ]; then
-    for ipadd in "${NODE_IPADDRESS[@]}"; do
-      for PKG in "${SUSE_PKG[@]}"; do
-	`./remote_command.sh $ipadd $PASSWORD "rpm -qi '$PKG' > /tmp/pkg_check 2>&1" 1 > /tmp/remote_command_check 2>&1`
-	rc="$?"
-	if  [ $rc -eq 0 ] || ( [ $rc -eq 2 ] && [ $OS == "suse12" ] ) ; then
-	  `./remote_scp_get.sh $ipadd $PASSWORD /tmp/pkg_check > /tmp/remote_scp_get_check 2>&1`
-	    if [ "$?" -ne 0 ]; then
-	      echo "Error running remote_scp_get.sh to $ipadd Node, check /tmp/remote_scp_get_check"
-	    else
-	      `cat /tmp/remote_command_check | grep 'command not found' > /dev/null 2>&1`
-	      if [ "$?" -eq 0 ]; then
-		echo "${bold}Failed${normal}, $ipadd Node ${bold}zypper${normal} package not installed"
-		pass=false
-		break
-	      else
-		`cat pkg_check | grep "not installed" > /dev/null 2>&1`
-		if [ "$?" -eq 0 ]; then
-		  echo "${bold}Failed${normal}, $ipadd Node package ${bold}${PKG}${normal} is not installed, please install"
-		  pass=false
-		fi
-	      `rm -f pkg_check`
-	    fi
-	  fi
+	done
+	
+	if $pass; then
+	  echo "$ipadd Node - Passed, all dependency packages are installed"
 	else
-	  echo "Error running remote_command.sh to $ipadd Node, check /tmp/remote_command_check"
-	  pass=false
+	  checkContinue
 	fi
+	echo ""
       done
-      
-      if $pass; then
-	echo "$ipadd Node - Passed, all dependency packages are installed"
-      else
-	checkContinue
-      fi
-      echo ""
-    done
-  fi
-fi  
-
-declare -a UBUNTU_PKG=("libboost-all-dev" "expect" "libdbi-perl" "perl" "openssl" "libreadline-dev" "rsync" "snappy" "net-tools")
-
-if [ $OS == "ubuntu16" ] ; then
-  pass=true
-  #check centos packages on local node
-  for PKG in "${UBUNTU_PKG[@]}"; do
-    `dpkg -s "$PKG" > /tmp/pkg_check 2>&1`
-    `cat /tmp/pkg_check | grep 'command not found' > /dev/null 2>&1`
-    if [ "$?" -eq 0 ]; then
-      echo "${bold}Failed${normal}, Local Node ${bold}dpkg${normal} package not installed"
-      pass=false
-      break
-    else
-      `cat /tmp/pkg_check | grep 'install ok installed' > /dev/null 2>&1`
-      if [ "$?" -ne 0 ]; then
-	echo "${bold}Failed${normal}, Local Node package ${bold}${PKG}${normal} is not installed, please install"
-	pass=false
-      fi
     fi
-  done
-
-  if $pass; then
-    echo "Local Node - Passed, all dependency packages are installed"
-  else
-    checkContinue
   fi
 
-  echo ""
-  pass=true
-  if [ "$IPADDRESSES" != "" ]; then
-    for ipadd in "${NODE_IPADDRESS[@]}"; do
-      for PKG in "${UBUNTU_PKG[@]}"; do
-	`./remote_command.sh $ipadd $PASSWORD "dpkg -s '$PKG' > /tmp/pkg_check 2>&1" 1 > /tmp/remote_command_check 2>&1`
-	rc="$?"
-	if  [ $rc -eq 0 ] || ( [ $rc -eq 2 ] && [ $OS == "suse12" ] ) ; then
-	  `./remote_scp_get.sh $ipadd $PASSWORD /tmp/pkg_check > /tmp/remote_scp_get_check 2>&1`
-	    if [ "$?" -ne 0 ]; then
-	      echo "Error running remote_scp_get.sh to $ipadd Node, check /tmp/remote_scp_get_check"
-	    else
-	      `cat /tmp/remote_command_check | grep 'command not found' > /dev/null 2>&1`
-	      if [ "$?" -eq 0 ]; then
-		echo "${bold}Failed${normal}, $ipadd Node ${bold}dpkg${normal} package not installed"
-		pass=false
-		break
-	      else
-		`cat pkg_check | grep 'install ok installed' > /dev/null 2>&1`
-		if [ "$?" -ne 0 ]; then
-		  echo "${bold}Failed${normal}, $ipadd Node package ${bold}${PKG}${normal} is not installed, please install"
-		  pass=false
-		fi
+  declare -a DEBIAN_PKG=("libboost-all-dev" "expect" "libdbi-perl" "perl" "openssl" "libreadline-dev" "rsync" "libsnappy1" "net-tools")
 
-		`rm -f pkg_check`
-	      fi
-	    fi
-	else
-	  echo "Error running remote_command.sh to $ipadd Node, check /tmp/remote_command_check"
-	  pass=false
-	fi
-      done
-      
-      if $pass; then
-	echo "$ipadd Node - Passed, all dependency packages are installed"
-      else
-	checkContinue
-      fi
-      echo ""
-    done
-  fi
-fi
-
-declare -a DEBIAN_PKG=("libboost-all-dev" "expect" "libdbi-perl" "perl" "openssl" "libreadline-dev" "rsync" "libsnappy1" "net-tools")
-
-if [ $OS == "debian8" ]; then
-  
-  pass=true
-  #check centos packages on local node
-  for PKG in "${DEBIAN_PKG[@]}"; do
-    `dpkg -s "$PKG" > /tmp/pkg_check 2>&1`
-    `cat /tmp/pkg_check | grep 'command not found' > /dev/null 2>&1`
-    if [ "$?" -eq 0 ]; then
-      echo "${bold}Failed${normal}, Local Node ${bold}dpkg${normal} package not installed"
+  if [ $OS == "debian8" ]; then
+    if [ ! `which dpkg 2>/dev/null` ] ; then
+      echo "${bold}Failed${normal}, Local Node ${bold}rpm${normal} package not installed"
       pass=false
-      break
-    else
-      `cat /tmp/pkg_check | grep 'install ok installed' > /dev/null 2>&1`
-      if [ "$?" -ne 0 ]; then
-	echo "${bold}Failed${normal}, Local Node package ${bold}${PKG}${normal} is not installed, please install"
-	pass=false
-      fi
-    fi
-  done
-
-  if $pass; then
-    echo "Local Node - Passed, all dependency packages are installed"
-  else
-    checkContinue
-  fi
-
-  echo ""
-  pass=true
-  if [ "$IPADDRESSES" != "" ]; then
-    for ipadd in "${NODE_IPADDRESS[@]}"; do
+      REPORTPASS=false
+    else    
+      pass=true
+      #check centos packages on local node
       for PKG in "${DEBIAN_PKG[@]}"; do
-	`./remote_command.sh $ipadd $PASSWORD "dpkg -s '$PKG' > /tmp/pkg_check 2>&1" 1 > /tmp/remote_command_check 2>&1`
-	rc="$?"
-	if  [ $rc -eq 0 ] || ( [ $rc -eq 2 ] && [ $OS == "suse12" ] ) ; then
-	  `./remote_scp_get.sh $ipadd $PASSWORD /tmp/pkg_check > /tmp/remote_scp_get_check 2>&1`
-	    if [ "$?" -ne 0 ]; then
-	      echo "Error running remote_scp_get.sh to $ipadd Node, check /tmp/remote_scp_get_check"
-	    else
-	      `cat /tmp/remote_command_check | grep 'command not found' > /dev/null 2>&1`
-	      if [ "$?" -eq 0 ]; then
-		echo "${bold}Failed${normal}, $ipadd Node ${bold}dpkg${normal} package not installed"
-		pass=false
-		break
-	      else
-		`cat pkg_check | grep 'install ok installed' > /dev/null 2>&1`
-		if [ "$?" -ne 0 ]; then
-		  echo "${bold}Failed${normal}, $ipadd Node package ${bold}${PKG}${normal} is not installed, please install"
-		  pass=false
-		fi
-
-		`rm -f pkg_check`
-	      fi
-	    fi
-	else
-	  echo "Error running remote_command.sh to $ipadd Node, check /tmp/remote_command_check"
+	`dpkg -s "$PKG" > /tmp/pkg_check 2>&1`
+	`cat /tmp/pkg_check | grep 'install ok installed' > /dev/null 2>&1`
+	if [ "$?" -ne 0 ]; then
+	  echo "${bold}Failed${normal}, Local Node package ${bold}${PKG}${normal} is not installed, please install"
 	  pass=false
+	  REPORTPASS=false
 	fi
       done
-      
+
       if $pass; then
-	echo "$ipadd Node - Passed, all dependency packages are installed"
+	echo "Local Node - Passed, all dependency packages are installed"
       else
 	checkContinue
       fi
-      echo ""
-    done
+    fi
+    
+    echo ""
+    pass=true
+    if [ "$IPADDRESSES" != "" ]; then
+      for ipadd in "${NODE_IPADDRESS[@]}"; do
+	for PKG in "${DEBIAN_PKG[@]}"; do
+	  `./remote_command.sh $ipadd $PASSWORD "dpkg -s '$PKG' > /tmp/pkg_check 2>&1" 1 > /tmp/remote_command_check 2>&1`
+	  rc="$?"
+	  if  [ $rc -ne 0 ] ; then
+	    echo "${bold}Failed${normal}, $ipadd Node package ${bold}${PKG}${normal} is not installed, please install"
+	    pass=false
+	    REPORTPASS=false
+	  fi
+	done
+	
+	if $pass; then
+	  echo "$ipadd Node - Passed, all dependency packages are installed"
+	else
+	  checkContinue
+	fi
+	echo ""
+      done
+    fi
   fi
+}
+
+echo ""  
+echo "*** This is the MariaDB Columnstore Cluster System test tool ***"
+echo ""
+
+checkLocalOS
+checkLocalDir
+if [ "$IPADDRESSES" != "" ]; then
+  checkPing
+  checkSSH
+  checkRemoteDir
+  checkOS
+  checkLocale
+  checkSELINUX
+  checkFirewalls
+  checkPorts
+  checkTime
+fi
+checkPackages
+
+if [ $REPORTPASS == true ] ; then
+  echo ""
+  echo "*** Finished Validation of the Cluster, all Test Passed ***"
+  echo ""
+  exit 0
+else
+  echo ""
+  echo "*** Finished Validation of the Cluster, Failures occurred. Check for Error/Failed test results ***"
+  echo ""
+  exit 1
 fi
 
-echo ""
-echo "*** Finished Validation of the Cluster, correct any failures ***"
-echo ""
-
-exit 0
