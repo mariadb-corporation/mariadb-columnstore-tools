@@ -186,7 +186,7 @@ checkLocalOS()
     echo "Local Node OS Version : $localOS"
     `cat /tmp/os_check | grep -i ubuntu > /dev/null 2>&1`
     if [ $? -eq 0 ] ; then
-      OS="ubunt16"
+      OS="ubuntu16"
     else
       `cat /tmp/os_check | grep -i debian > /dev/null 2>&1`
       if [ $? -eq 0 ] ; then
