@@ -65,7 +65,7 @@ if ! [[ $NUMBER_BACKUPS =~ $REcheck ]] ; then
    reportStatus 1
 fi
 if [ $NUMBER_BACKUPS -lt 0 ] || [ $NUMBER_BACKUPS -gt 20 ]; then
-    printLog "ERROR: NUMBER_BACKUPS must be an integer between 1 and 100 (value: $NUMBER_BACKUPS)" >&2
+    printLog "ERROR: NUMBER_BACKUPS must be an integer between 1 and 20 (value: $NUMBER_BACKUPS)" >&2
     reportStatus 1
 fi
 
@@ -131,6 +131,14 @@ while getopts hdn:zv-: OPT; do
             ;;
         n)
             NUMBER_CONCURRENT=$OPTARG
+            if ! [[ $NUMBER_CONCURRENT =~ $REcheck ]] ; then
+               printLog "ERROR: NUMBER_CONCURRENT not a number" >&2
+               reportStatus 1
+            fi
+            if [ $NUMBER_CONCURRENT -lt 0 ] || [ $NUMBER_CONCURRENT -gt 100 ]; then
+                printLog "ERROR: NUMBER_CONCURRENT must be an integer between 1 and 100 (value: $NUMBER_CONCURRENT)" >&2
+                reportStatus 1
+            fi
             ;;
         z)
             COMPRESS=true
