@@ -1,8 +1,8 @@
-#columnstoreBackup / columnstoreRestore README
+# columnstoreBackup / columnstoreRestore README
 
-#columnstoreBackup
+# columnstoreBackup
 
-##BACKGROUND
+## BACKGROUND
 
 High level steps involved in performing a backup of MariaDB ColumnStore are:
 
@@ -15,7 +15,7 @@ columnstoreBackup will automate these steps to streamline the process.
 
 WARNING: Currently columnstoreBackup is only for ColumnStore data backups. Other engines may not be fully backed up and data could be lost when restoring.
 
-##SETUP
+## SETUP
 
 To run columnstoreBackup you'll need to setup a backup server with passwordless ssh login available for the user account that installed MariaDB ColumnStore. (Default: root)
 
@@ -35,7 +35,7 @@ There is an optional columnstoreBackup.config file that when placed in the same 
 Where "n" is the number of incremental backups to store. (Default: 3)
 
 
-##RUNNING
+## RUNNING
 
 columnstoreBackup must be run as root user either logging in as root or via the sudo command.
 ```bash
@@ -66,11 +66,11 @@ OPTIONS:
 This will execute a backup for the system with a parent OAM module located at 192.168.1.2 and store all backup files inside the directory located at home/user/columnstoreBackupData. Option v will print out a more verbose logging of commands executed and option z will let rsync utilize the compression option for file transfers.
 
 
-##LOGGING
+## LOGGING
 
 Logging is output to the console as well as to a columnstoreBackup.log that is located in the directory columnstoreBackup is executed. This will contain some extra details on some issues. Log rotation is left to the user for handling.
 
-##Return Codes
+## Return Codes
 
 * 0   - success
 * 1   - command line parameter or config file issue detected
@@ -80,7 +80,7 @@ Logging is output to the console as well as to a columnstoreBackup.log that is l
 * 5   - rsync command failed with an error
 * 255 - could not connect via passwordless ssh
 
-##Operation Notes
+## Operation Notes
 
 columnstoreBackup will create the following directories inside the Backup Data Directory:
 
@@ -93,11 +93,11 @@ These directories are created if they do not exist and can be created prior to e
 
 The columnstoreBackup option -n [value] limits the number parallel rsync commands executed at a given time. The default 5 means up to 5 DBRoots will kick off rysnc commands to various PMs and the backup system will wait until all are complete and verified successful. At this time it will kick off another 5 DBRoots. The progress indicator should reflect the percentage of total completion and not individual rysnc commands. This value can be set higher via the -n command but if the number of DBRoots present in the system is large enough there may be a performance hit on system processing or network bandwidth limitations. 
 
-#columnstoreRestore
+# columnstoreRestore
 
 The tool is designed to be run on the system storing the backups. This will automate restoring from backups created by the columnstoreBackup tool.
 
-##SETUP
+## SETUP
 
 To run columnstoreRestore you'll need to setup a backup server with passwordless ssh login available for the user account that installed MariaDB ColumnStore. (Default: root)
 
@@ -142,7 +142,7 @@ cd [INSTALL_DIR]/mysql/db
 7. On the backup system run columnstoreRestore script
 
 
-##RUNNING
+## RUNNING
 
 columnstoreRestore must be run as root user either logging in as root or via the sudo command.
 ```bash
@@ -173,11 +173,11 @@ OPTIONS:
 This will execute a restore for the MariaDB ColumnStore system with a parent OAM module located at 192.168.1.100 from the directory located at home/user/columnstoreBackupData. Option v will print out a more verbose logging of commands executed and option z will let rsync utilize the compression option for file transfers.
 
 
-##LOGGING
+## LOGGING
 
 Logging is output to the console as well as to a columnstoreRestore.log that is located in the directory columnstoreBackup is executed. This will contain some extra details on some issues. Log rotation is left to the user for handling.
 
-##Return Codes
+## Return Codes
 
 * 0   - success
 * 1   - command line parameter or config file issue detected
@@ -187,7 +187,7 @@ Logging is output to the console as well as to a columnstoreRestore.log that is 
 * 5   - rsync command failed with an error
 * 255 - could not connect via passwordless ssh
 
-##Operation Notes
+## Operation Notes
 
 columnstoreRestore will create a restoreConfig directory inside the backupServerLocation defined at command line. This is just meant to store a copy of the restored systems version and configuration file for verification the restore is possible.
 
