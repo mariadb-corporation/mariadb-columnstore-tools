@@ -1,4 +1,16 @@
 #!/bin/bash
+#
+# Copyright (c) 2017 MariaDB Corporation Ab
+#
+# Use of this software is governed by the Business Source License included
+# in the LICENSE.TXT file.
+#
+# Change Date: 2020-09-01
+#
+# On the date above, in accordance with the Business Source License, use
+# of this software will be governed by version 2 or later of the General
+# Public License.
+#
 MCS_DIR="/usr/local/mariadb/columnstore"
 
 # capture getSystemStatus and remove first 9 lines and blank lines to just have status table contents
