@@ -339,28 +339,38 @@ getSystemInfo () {
 
 # Go grab PM1's columnstore.xml file and parse it to find out information on system nodes.
 executeRsync false "" $REMOTE_USER@$PM1:$INSTALL_DIR/etc/Columnstore.xml $restoreServerConfigeDir
-command="$rsyncCommand $REMOTE_USER@$PM1:$INSTALL_DIR/etc/Columnstore.xml $restoreServerConfigeDir"
 
-executeRsync false "" $REMOTE_USER@$PM1:$INSTALL_DIR/releasenum $restoreServerConfigeDir
-command="$rsyncCommand $REMOTE_USER@$PM1:$INSTALL_DIR/releasenum $restoreServerConfigeDir"
+if [ -e $BACKUP_SERVER_LOCATION/releasenum ]; then
 
-source $BACKUP_SERVER_LOCATION/releasenum
+    if ssh $REMOTE_USER@$PM1 "test -e $INSTALL_DIR/releasenum"; then
+        executeRsync false "" $REMOTE_USER@$PM1:$INSTALL_DIR/releasenum $restoreServerConfigeDir
+    else
+        version=$(ssh $REMOTE_USER@$PM1 $INSTALL_DIR/bin/mcsadmin getsoftwareinfo | awk '{for (I=1;I<=NF;I++) if ($I == "Version") {print $(I+2); exit;};}')
+        release=$(ssh $REMOTE_USER@$PM1 $INSTALL_DIR/bin/mcsadmin getsoftwareinfo | awk '{for (I=1;I<=NF;I++) if ($I == "Release") {print $(I+2); exit;};}')
+        echo "version=$version" >> $restoreServerConfigeDir/releasenum
+        echo "release=$release" >> $restoreServerConfigeDir/releasenum
+    fi
 
-backupVersion=$version
-backupRelease=$release
+    source $BACKUP_SERVER_LOCATION/releasenum
 
-source $restoreServerConfigeDir/releasenum
+    backupVersion=$version
+    backupRelease=$release
 
-restoreVersion=$version
-restoreRelease=$release
+    source $restoreServerConfigeDir/releasenum
 
-if [ $backupVersion != $restoreVersion ] || [ $backupRelease != $restoreRelease ]; then
-    printLog "ERROR: Version/Release differs from backups Version/Release" >&2 
-    printLog "Backup  = $backupVersion-$backupRelease" >&2 
-    printLog "Restore = $restoreVersion-$restoreRelease" >&2  
+    restoreVersion=$version
+    restoreRelease=$release
+
+    if [ $backupVersion != $restoreVersion ] || [ $backupRelease != $restoreRelease ]; then
+        printLog "ERROR: Version/Release differs from backups Version/Release" >&2 
+        printLog "Backup  = $backupVersion-$backupRelease" >&2 
+        printLog "Restore = $restoreVersion-$restoreRelease" >&2  
+        reportStatus 4
+    fi
+else
+    printLog "ERROR: Version/Release releasenum file missing." >&2
     reportStatus 4
 fi
-
 ## parse it
 restore_systemName=$(xmllint --xpath 'string(//SystemName)' $restoreServerConfigeDir/Columnstore.xml)
 restore_singleServerInstall=$(xmllint --xpath 'string(//SingleServerInstall)' $restoreServerConfigeDir/Columnstore.xml)
@@ -489,7 +499,7 @@ if [ $backup_singleServerInstall == "n" ]; then
     do
         umModuleIP1=$(xmllint --xpath "string(//ModuleIPAddr$moduleID-1-2)" $BACKUP_SERVER_LOCATION/Columnstore.xml)
         umModuleIP2=$(xmllint --xpath "string(//ModuleIPAddr$moduleID-2-2)" $BACKUP_SERVER_LOCATION/Columnstore.xml)
-    echo "r=${restore_umModuleIP[$moduleID]}  1=$umModuleIP1   2=$umModuleIP2 " 1>&3
+#    echo "r=${restore_umModuleIP[$moduleID]}  1=$umModuleIP1   2=$umModuleIP2 " 1>&3
         if [ ${restore_umModuleIP[$moduleID]} != $umModuleIP1 ] && [ ${restore_umModuleIP[$moduleID]} != $umModuleIP2 ]; then
             printLog "ERROR: Restore and Backup IP addresses differ at UM$moduleID" >&2
             printLog "(Restore  IP  = $restore_umModuleIP[$moduleID])" >&2
@@ -504,7 +514,7 @@ if [ $backup_singleServerInstall == "n" ]; then
 
         pmModuleIP1=$(xmllint --xpath "string(//ModuleIPAddr$moduleID-1-3)" $BACKUP_SERVER_LOCATION/Columnstore.xml)
         pmModuleIP2=$(xmllint --xpath "string(//ModuleIPAddr$moduleID-2-3)" $BACKUP_SERVER_LOCATION/Columnstore.xml)
-    echo "r=${restore_pmModuleIP[$moduleID]}  1=$pmModuleIP1   2=$pmModuleIP2 " 1>&3
+#    echo "r=${restore_pmModuleIP[$moduleID]}  1=$pmModuleIP1   2=$pmModuleIP2 " 1>&3
         if [ ${restore_pmModuleIP[$moduleID]} != $pmModuleIP1 ] && [ ${restore_pmModuleIP[$moduleID]} != $pmModuleIP2 ]; then
             printLog "ERROR: Restore and Backup IP addresses differ at PM$moduleID" >&2
             printLog "(Restore  IP  = $restore_pmModuleIP[$moduleID])" >&2
@@ -752,8 +762,6 @@ restoreConfig () {
 printLog "Config Restore..."
 
 backupCnfDir="cnf"
-
-executeRsync $DRY_RUN "" $BACKUP_SERVER_LOCATION/Columnstore.xml $REMOTE_USER@$PM1:$INSTALL_DIR/etc/
 
 if [ $BACKUP_SERVER_LOCATION/$backupCnfDir ]; then
     executeRsync $DRY_RUN "" $BACKUP_SERVER_LOCATION/$backupCnfDir $REMOTE_USER@$PM1:$INSTALL_DIR/mysql/
