@@ -753,8 +753,6 @@ printLog "Config Restore..."
 
 backupCnfDir="cnf"
 
-executeRsync $DRY_RUN "" $BACKUP_SERVER_LOCATION/Columnstore.xml $REMOTE_USER@$PM1:$INSTALL_DIR/etc/
-
 if [ $BACKUP_SERVER_LOCATION/$backupCnfDir ]; then
     executeRsync $DRY_RUN "" $BACKUP_SERVER_LOCATION/$backupCnfDir $REMOTE_USER@$PM1:$INSTALL_DIR/mysql/
 fi
