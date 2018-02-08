@@ -301,12 +301,14 @@ done
 moveBackupFiles () {
 moveThis=$1
 destPath=$2
-if [ ! -e $BACKUP_SERVER_LOCATION/backup.1 ]; then
-    mkdir $BACKUP_SERVER_LOCATION/backup.1
-fi
-if [ "$DRY_RUN" = false ]; then
-    if [ -e $BACKUP_SERVER_LOCATION/$moveThis ]; then
-        mv $BACKUP_SERVER_LOCATION/$moveThis $BACKUP_SERVER_LOCATION/$destPath
+if [ -e $moveThis ]; then
+    if [ ! -e $BACKUP_SERVER_LOCATION/backup.1 ]; then
+        mkdir $BACKUP_SERVER_LOCATION/backup.1
+    fi
+    if [ "$DRY_RUN" = false ]; then
+        if [ -e $BACKUP_SERVER_LOCATION/$moveThis ]; then
+            mv $BACKUP_SERVER_LOCATION/$moveThis $BACKUP_SERVER_LOCATION/$destPath
+        fi
     fi
 fi
 }
@@ -389,9 +391,18 @@ getSystemInfo () {
 moveBackupFiles Columnstore.xml ./backup.1/
 executeRsync false --link-dest=./backup.1 $REMOTE_USER@$PM1:$INSTALL_DIR/etc/Columnstore.xml $BACKUP_SERVER_LOCATION 
 
-moveBackupFiles releasenum ./backup.1/
-executeRsync false --link-dest=./backup.1 $REMOTE_USER@$PM1:$INSTALL_DIR/releasenum $BACKUP_SERVER_LOCATION
+if ssh $REMOTE_USER@$PM1 "test -e $INSTALL_DIR/releasenum"; then
+    moveBackupFiles releasenum ./backup.1/
+    executeRsync false "--link-dest=./backup.1" $REMOTE_USER@$PM1:$INSTALL_DIR/releasenum $BACKUP_SERVER_LOCATION
+fi
 
+if [ ! -e $BACKUP_SERVER_LOCATION/releasenum ]; then
+    moveBackupFiles releasenum ./backup.1/
+    version=$(ssh $REMOTE_USER@$PM1 $INSTALL_DIR/bin/mcsadmin getsoftwareinfo | awk '{for (I=1;I<=NF;I++) if ($I == "Version") {print $(I+2); exit;};}')
+    release=$(ssh $REMOTE_USER@$PM1 $INSTALL_DIR/bin/mcsadmin getsoftwareinfo | awk '{for (I=1;I<=NF;I++) if ($I == "Release") {print $(I+2); exit;};}')
+    echo "version=$version" >> $BACKUP_SERVER_LOCATION/releasenum
+    echo "release=$release" >> $BACKUP_SERVER_LOCATION/releasenum
+fi
 ## parse it
 systemName=$(xmllint --xpath 'string(//SystemName)' $BACKUP_SERVER_LOCATION/Columnstore.xml)
 singleServerInstall=$(xmllint --xpath 'string(//SingleServerInstall)' $BACKUP_SERVER_LOCATION/Columnstore.xml)
