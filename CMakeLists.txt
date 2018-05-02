@@ -1,0 +1,196 @@
+CMAKE_MINIMUM_REQUIRED(VERSION 2.8.12)
+
+
+# Avoid warnings in higher versions
+if("${CMAKE_MAJOR_VERSION}.${CMAKE_MINOR_VERSION}" GREATER 2.6)
+ CMAKE_POLICY(VERSION 2.8)
+endif()
+
+# explicitly set the policy to OLD
+# (cannot use NEW, not everyone is on cmake-2.8.12 yet)
+IF(POLICY CMP0022)
+  CMAKE_POLICY(SET CMP0022 OLD)
+ENDIF()
+
+# We use the LOCATION target property (CMP0026)
+# and get_target_property() for non-existent targets (CMP0045)
+# and INSTALL_NAME_DIR (CMP0042)
+IF(CMAKE_VERSION VERSION_EQUAL "3.0.0" OR
+   CMAKE_VERSION VERSION_GREATER "3.0.0")
+ CMAKE_POLICY(SET CMP0026 OLD)
+ CMAKE_POLICY(SET CMP0045 OLD)
+ CMAKE_POLICY(SET CMP0042 OLD)
+ENDIF()
+
+MESSAGE(STATUS "Running cmake version ${CMAKE_VERSION}")
+
+
+# Generate "something" to trigger cmake rerun when VERSION changes
+CONFIGURE_FILE(
+  ${CMAKE_SOURCE_DIR}/VERSION
+  ${CMAKE_BINARY_DIR}/VERSION.dep
+)
+
+# Read value for a variable from VERSION.
+
+MACRO(COLUMNSTORE_GET_CONFIG_VALUE keyword var)
+ IF(NOT ${var})
+   FILE (STRINGS ${CMAKE_SOURCE_DIR}/VERSION str REGEX "^[ ]*${keyword}=")
+   IF(str)
+     STRING(REPLACE "${keyword}=" "" str ${str})
+     STRING(REGEX REPLACE  "[ ].*" ""  str "${str}")
+     SET(${var} ${str})
+   ENDIF()
+ ENDIF()
+ENDMACRO()
+
+MACRO(GET_COLUMNSTORE_VERSION)
+  COLUMNSTORE_GET_CONFIG_VALUE("COLUMNSTORE_VERSION_MAJOR" MAJOR_VERSION)
+  COLUMNSTORE_GET_CONFIG_VALUE("COLUMNSTORE_VERSION_MINOR" MINOR_VERSION)
+  COLUMNSTORE_GET_CONFIG_VALUE("COLUMNSTORE_VERSION_PATCH" PATCH_VERSION)
+  COLUMNSTORE_GET_CONFIG_VALUE("COLUMNSTORE_VERSION_EXTRA" EXTRA_VERSION)
+  COLUMNSTORE_GET_CONFIG_VALUE("COLUMNSTORE_VERSION_RELEASE" RELEASE_VERSION)
+  
+
+IF(NOT "${MAJOR_VERSION}" MATCHES "[0-9]+" OR
+   NOT "${MINOR_VERSION}" MATCHES "[0-9]+" OR
+   NOT "${PATCH_VERSION}" MATCHES "[0-9]+")
+    MESSAGE(FATAL_ERROR "VERSION file cannot be parsed.")
+  ENDIF()
+
+  SET(VERSION "${MAJOR_VERSION}.${MINOR_VERSION}.${PATCH_VERSION}${EXTRA_VERSION}")
+  MESSAGE(STATUS "MariaDB-Columnstore ${VERSION}")
+  SET(CPACK_PACKAGE_VERSION_MAJOR ${MAJOR_VERSION})
+  SET(CPACK_PACKAGE_VERSION_MINOR ${MINOR_VERSION})
+  SET(CPACK_PACKAGE_VERSION_PATCH ${PATCH_VERSION}${EXTRA_VERSION})
+  SET(PACKAGE_VERSION "${MAJOR_VERSION}.${MINOR_VERSION}.${PATCH_VERSION}${EXTRA_VERSION}")
+  SET(PACKAGE_RELEASE "${RELEASE_VERSION}")
+ENDMACRO()
+
+# Get columnstore version
+GET_COLUMNSTORE_VERSION()
+
+SET(CMAKE_INSTALL_PREFIX "/usr/local/mariadb/columnstore")
+SET(CPACK_RPM_PACKAGE_DEBUG 1)
+SET(CPACK_PACKAGING_INSTALL_PREFIX ${CMAKE_INSTALL_PREFIX})
+
+SET(CPACK_PACKAGE_NAME "mariadb-columnstore-tools")
+SET(ENGINE_ARCH "amd64")
+
+SET(CPACK_PACKAGE_FILE_NAME "${CPACK_PACKAGE_NAME}-${PACKAGE_VERSION}-${PACKAGE_RELEASE}")
+
+SET(CPACK_PACKAGE_DESCRIPTION_SUMMARY "MariaDB Columnstore: a very fast and robust SQL database server")
+SET(CPACK_PACKAGE_URL "http://mariadb.org")
+SET(CPACK_PACKAGE_CONTACT "MariaDB Corporation Ab")
+SET(CPACK_PACKAGE_SUMMARY "MariaDB-Columnstore software")
+SET(CPACK_PACKAGE_VENDOR "MariaDB Corporation Ab")
+SET(CPACK_PACKAGE_LICENSE "Copyright (c) 2016 MariaDB Corporation Ab., all rights reserved; redistributable under the terms of the GPL, see the file COPYING for details.")
+
+SET(CPACK_PACKAGE_RELOCATABLE FALSE)
+
+SET (TOOLS_DIR          "${CMAKE_INSTALL_PREFIX}/tools")
+SET (BACKUP_RESTORE_DIR "${TOOLS_DIR}/backuprestore")
+SET (MONITOR_DIR        "${TOOLS_DIR}/monitoring")
+
+ADD_SUBDIRECTORY(backuprestore)
+ADD_SUBDIRECTORY(monitoring)
+
+INSTALL(FILES COPYRIGHT.txt LICENSE.txt README.md VERSION DESTINATION ${TOOLS_DIR} )
+
+IF(DEB)
+
+CMAKE_MINIMUM_REQUIRED(VERSION 3.4)
+
+SET(CPACK_GENERATOR "DEB")
+
+IF (NOT CPACK_DEBIAN_PACKAGE_VERSION)
+    SET (CPACK_DEBIAN_PACKAGE_VERSION ${PACKAGE_VERSION})
+ENDIF()
+IF (NOT CPACK_DEBIAN_PACKAGE_RELEASE)
+    SET (CPACK_DEBIAN_PACKAGE_RELEASE ${PACKAGE_RELEASE})
+ENDIF()
+
+SET(CPACK_DEBIAN_PACKAGE_NAME ${CPACK_PACKAGE_NAME})
+
+SET(CPACK_DEBIAN_PACKAGE_LICENSE "GPLv2")
+SET(CPACK_DEBIAN_PACKAGE_RELOCATABLE FALSE)
+SET(CPACK_DEBIAN_PACKAGE_URL ${CPACK_PACKAGE_URL})
+SET(CPACK_DEBIAN_PACKAGE_SUMMARY ${CPACK_PACKAGE_SUMMARY})
+SET(CPACK_DEBIAN_PACKAGE_VENDOR ${CPACK_PACKAGE_VENDOR})
+SET(CPACK_DEBIAN_PACKAGE_LICENSE ${CPACK_PACKAGE_LICENSE})
+
+SET(CPACK_DEBIAN_PACKAGE_DESCRIPTION ${CPACK_PACKAGE_DESCRIPTION_SUMMARY})
+
+SET(CPACK_DEBIAN_PACKAGE_PROVIDES "mariadb-columnstore-tools")
+SET(CPACK_DEBIAN_PACKAGE_DEPENDS "libxml2 , rsync")
+
+INCLUDE (CPack)
+
+ENDIF()
+
+IF(RPM)
+
+SET(CPACK_GENERATOR "RPM")
+
+IF (NOT CPACK_RPM_PACKAGE_VERSION)
+SET (CPACK_RPM_PACKAGE_VERSION ${PACKAGE_VERSION})
+ENDIF()
+IF (NOT CPACK_RPM_PACKAGE_RELEASE)
+SET (CPACK_RPM_PACKAGE_RELEASE ${PACKAGE_RELEASE})
+ENDIF()
+
+SET(CPACK_RPM_PACKAGE_NAME ${CPACK_PACKAGE_NAME})
+
+SET(CPACK_RPM_PACKAGE_LICENSE "GPLv2")
+SET(CPACK_RPM_PACKAGE_RELOCATABLE FALSE)
+SET(CPACK_RPM_PACKAGE_GROUP "Applications/Databases")
+SET(CPACK_RPM_PACKAGE_URL ${CPACK_PACKAGE_URL})
+SET(CPACK_RPM_PACKAGE_SUMMARY ${CPACK_PACKAGE_SUMMARY})
+SET(CPACK_RPM_PACKAGE_VENDOR ${CPACK_PACKAGE_VENDOR})
+SET(CPACK_RPM_PACKAGE_LICENSE ${CPACK_PACKAGE_LICENSE})
+
+SET(CPACK_RPM_PACKAGE_DESCRIPTION "${CPACK_PACKAGE_DESCRIPTION_SUMMARY}
+
+It is GPL v2 licensed, which means you can use the it free of charge under the
+conditions of the GNU General Public License Version 2 (http://www.gnu.org/licenses/).
+
+MariaDB documentation can be found at https://mariadb.com/kb
+MariaDB bug reports should be submitted through https://jira.mariadb.org 
+
+")
+
+# "set/append array" - append a set of strings, separated by a space
+MACRO(SETA var)
+  FOREACH(v ${ARGN})
+    SET(${var} "${${var}} ${v}")
+  ENDFOREACH()
+ENDMACRO(SETA)
+
+SETA(CPACK_RPM_PACKAGE_PROVIDES "mariadb-columnstore-tools")
+SETA(CPACK_RPM_PACKAGE_REQUIRES "libxml2" "rsync")
+
+
+SET(CPACK_RPM_SPEC_MORE_DEFINE "${CPACK_RPM_SPEC_MORE_DEFINE}
+%define ignore \#
+")
+
+SET(ignored
+    "%ignore /usr"
+    "%ignore /usr/local"
+)
+
+SET(CPACK_RPM_USER_FILELIST
+"/usr/local/mariadb/columnstore/tools/COPYRIGHT.txt"
+"/usr/local/mariadb/columnstore/tools/LICENSE.txt"
+"/usr/local/mariadb/columnstore/tools/README.md"
+"/usr/local/mariadb/columnstore/tools/VERSION"
+"/usr/local/mariadb/columnstore/tools/backuprestore/columnstoreBackup"
+"/usr/local/mariadb/columnstore/tools/backuprestore/columnstoreRestore"
+"/usr/local/mariadb/columnstore/tools/backuprestore/README.md"
+"/usr/local/mariadb/columnstore/tools/monitoring/check_mariadbcs"
+"/usr/local/mariadb/columnstore/tools/monitoring/README.md"
+${ignored})
+
+INCLUDE (CPack)
+
+ENDIF()
