@@ -97,18 +97,11 @@ helpPrint () {
     echo "the backup system to have passwordless login enabled for the account that" 1>&3
     echo "MariaDB ColumnStore was installed and maintained. (Assumes root by default)" 1>&3
     echo "" 1>&3
-    echo "This tool must be run as root or with sudo." 1>&3
-    echo "" 1>&3
     echo "The default behavior is to run rsync locally to each UM and PM." 1>&3
     echo "PM data is stored in data directories labeled pm[moduleID]dbroot[DBrootID]" 1>&3
     echo "UM data is stored in directories labeled um[moduleID]" 1>&3
     echo "my.cnf data is stored in directory cnf" 1>&3
     echo "Columnstore.xml is stored in the top level of backupServerLocation" 1>&3
-    echo "" 1>&3
-    echo "The -n option uses the rsync link-dest option to enable incremental backups." 1>&3
-    echo "These are stored in backup.1 thru backup.[n-1] from newest to oldest." 1>&3
-    echo "The impact on extra space needed is based on the amount data that changes." 1>&3
-    echo "with little to no data set changes the incremental backup size is small." 1>&3
     echo "" 1>&3
     echo "Usage: $0 [options] activeParentOAM backupServerLocation" 1>&3
     echo "" 1>&3
@@ -237,12 +230,6 @@ fi
 #
 PM1=$1
 BACKUP_SERVER_LOCATION=$2
-
-## Check if root or sudo
-if [[ $EUID -ne 0 ]]; then
-   printLog "ERROR: This script must be run as root or with sudo" 
-   reportStatus 1
-fi
 
 ## Check rsync and xmllint are available
 if ! type rsync > /dev/null; then

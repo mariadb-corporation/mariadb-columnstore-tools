@@ -77,16 +77,14 @@ printLog "[$USER] $0 $@"
 
 helpPrint () {
           ################################################################################
-    echo "MariaDB ColumnStore Automated Backup Tool" 1>&3
-    echo "This tool is meant to automate the ColumnStore backup procedure documented at:" 1>&3
+    echo "MariaDB ColumnStore Automated Restore Tool" 1>&3
+    echo "This tool is meant to automate the ColumnStore restore procedure documented at:" 1>&3
     echo "" 1>&3
     echo "https://mariadb.com/kb/en/mariadb/columnstore-backup-and-recovery/" 1>&3
     echo "" 1>&3
     echo "The tool is designed to be run on the system storing the backups. It requires" 1>&3
     echo "the backup system to have passwordless login enabled for the account that" 1>&3
-    echo "MariaDB ColumnStore was installed and maintained. (Assumes root by default)" 1>&3
-    echo "" 1>&3
-    echo "This tool must be run as root or with sudo." 1>&3
+    echo "MariaDB ColumnStore was installed and maintained. (Assumes current user by default)" 1>&3
     echo "" 1>&3
     echo "The tool expects MariaDB Columnstore to be shutdown in a fresh install state." 1>&3
     echo "Take the following steps to prepare system for restore: " 1>&3
@@ -112,7 +110,7 @@ helpPrint () {
     echo "-d,--dry-run      Dry run and executes rsync dry run with stats." 1>&3
     echo "-z,--compress     Utilize the compression option for rsync."  1>&3
     echo "-n [value]        Maximum number parallel rsync commands. (Default: 5)." 1>&3
-    echo "--user=[user]     Change the user performing remote sessions. (Default: root)" 1>&3
+    echo "--user=[user]     Change the user performing remote sessions. (Default: Current User)" 1>&3
     echo "" 1>&3
     echo "--install-dir=[PATH]  Change the install directory of ColumnStore." 1>&3
     echo "                          Default: /usr/local/mariadb/columnstore" 1>&3
@@ -218,12 +216,6 @@ fi
 BACKUP_SERVER_LOCATION=$1
 PM1=$2
 
-## Check if root or sudo
-if [[ $EUID -ne 0 ]]; then
-   printLog "This script must be run as root or with sudo" 
-   reportStatus 1
-fi
-
 ## Check rsync and xmllint are available
 if ! type rsync > /dev/null; then
     printLog "rsync is not installed. Please install and rerun." >&2
@@ -234,6 +226,10 @@ if ! type xmllint > /dev/null; then
     reportStatus 2
 fi
 
+if [ ! -d "$BACKUP_SERVER_LOCATION" ]; then
+    printLog "Directory $BACKUP_SERVER_LOCATION does not exist." >&2
+    reportStatus 1
+fi
 
 ## setup rsync option lists
 rsyncCommand="rsync "
