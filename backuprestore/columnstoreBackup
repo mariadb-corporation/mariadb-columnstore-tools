@@ -506,7 +506,7 @@ measureDiskSpace () {
         fi
     else
         if [ "$DRY_RUN" = false ]; then  
-            printLog "WARNING: Disk Space NOT verified for backup location." >&2
+            printLog "WARNING: Disk Space NOT verified for backup system." >&2
             printLog "         Run with -d option to collect disk space requirement information via rsync." >&2
         fi
         # Do all this if we didn't run a dry-run so that the progress bar works.
