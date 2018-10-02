@@ -28,6 +28,13 @@ MESSAGE(STATUS "Running cmake version ${CMAKE_VERSION}")
 option(BACKUPRESTORE "Build the backup restore tool" ON)
 option(MONITORING "Build the monitoring tool" ON)
 option(REMOTE_CPIMPORT "Build the remote cpimport / mcsimport tool" ON)
+option(TEST_RUNNER "Build the test suite" OFF)
+option(DEB "Build a DEB" OFF)
+option(RPM "Build an RPM" OFF)
+
+if (TEST_RUNNER)
+  enable_testing()
+endif (TEST_RUNNER)
 
 # Generate "something" to trigger cmake rerun when VERSION changes
 CONFIGURE_FILE(
@@ -56,9 +63,9 @@ MACRO(GET_COLUMNSTORE_VERSION)
   COLUMNSTORE_GET_CONFIG_VALUE("COLUMNSTORE_VERSION_RELEASE" RELEASE_VERSION)
   
 
-IF(NOT "${MAJOR_VERSION}" MATCHES "[0-9]+" OR
-   NOT "${MINOR_VERSION}" MATCHES "[0-9]+" OR
-   NOT "${PATCH_VERSION}" MATCHES "[0-9]+")
+  IF(NOT "${MAJOR_VERSION}" MATCHES "[0-9]+" OR
+    NOT "${MINOR_VERSION}" MATCHES "[0-9]+" OR
+    NOT "${PATCH_VERSION}" MATCHES "[0-9]+")
     MESSAGE(FATAL_ERROR "VERSION file cannot be parsed.")
   ENDIF()
 
@@ -303,6 +310,10 @@ if(WIN32)
         include(CPack)
     ENDIF(REMOTE_CPIMPORT)
 endif(WIN32)
+
+if (TEST_RUNNER)
+  include(CTest)
+endif (TEST_RUNNER)
 
 MESSAGE(STATUS "-----------------------------------------------")
 MESSAGE(STATUS "CMAKE_INSTALL_PREFIX = ${CMAKE_INSTALL_PREFIX}")
