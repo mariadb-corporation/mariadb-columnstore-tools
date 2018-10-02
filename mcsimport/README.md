@@ -24,9 +24,9 @@ sudo make install
 
 #### Build and install mcsimport
 ```shell
-git clone https://github.com/mariadb-corporation/mariadb-columnstore-data-adapters
+git clone https://github.com/mariadb-corporation/mariadb-columnstore-tools
 mkdir build && cd build
-cmake ../mariadb-columnstore-data-adapters -DCMAKE_INSTALL_PREFIX=/usr -DKAFKA=OFF -DKETTLE=OFF -DMAX_CDC=OFF -DMAX_KAFKA=OFF -DREMOTE_CPIMPORT=ON -DTEST_RUNNER=ON
+cmake ../mariadb-columnstore-tools -DBACKUPRESTORE=OFF -DMONITORING=OFF -DREMOTE_CPIMPORT=ON -DTEST_RUNNER=ON
 make
 ctest -V
 sudo make install
@@ -49,12 +49,12 @@ Afterwards set the environment variable `YAML_CPP_INSTALL_DIR` to the cloned yam
 
 #### Build and package mcsimport
 ```shell
-git clone https://github.com/mariadb-corporation/mariadb-columnstore-data-adapters
+git clone https://github.com/mariadb-corporation/mariadb-columnstore-tools
 mkdir build && cd build
-cmake ../mariadb-columnstore-data-adapters -DKAFKA=OFF -DKETTLE=OFF -DMAX_CDC=OFF -DMAX_KAFKA=OFF -DREMOTE_CPIMPORT=ON -G "Visual Studio 14 2015 Win64" -DTEST_RUNNER=ON
+cmake ../mariadb-columnstore-data-adapters -DBACKUPRESTORE=OFF -DMONITORING=OFF -DREMOTE_CPIMPORT=ON -G "Visual Studio 14 2015 Win64" -DTEST_RUNNER=ON
 cmake --build . --config RelWithDebInfo --target package
 ctest -C RelWithDebInfo -V
-signtool.exe sign /tr http://timestamp.digicert.com /td sha256 /fd sha256 /a "MariaDB ColumnStore Remote Import*-x64.msi"
+signtool.exe sign /tr http://timestamp.digicert.com /td sha256 /fd sha256 /a "MariaDB ColumnStore Remote CpImport*-x64.msi"
 ```
 
 ## Usage

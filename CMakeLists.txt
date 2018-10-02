@@ -45,14 +45,14 @@ CONFIGURE_FILE(
 # Read value for a variable from VERSION.
 
 MACRO(COLUMNSTORE_GET_CONFIG_VALUE keyword var)
- IF(NOT ${var})
-   FILE (STRINGS ${CMAKE_SOURCE_DIR}/VERSION str REGEX "^[ ]*${keyword}=")
-   IF(str)
-     STRING(REPLACE "${keyword}=" "" str ${str})
-     STRING(REGEX REPLACE  "[ ].*" ""  str "${str}")
-     SET(${var} ${str})
-   ENDIF()
- ENDIF()
+  IF(NOT ${var})
+    FILE (STRINGS ${CMAKE_SOURCE_DIR}/VERSION str REGEX "^[ ]*${keyword}=")
+    IF(str)
+      STRING(REPLACE "${keyword}=" "" str ${str})
+      STRING(REGEX REPLACE  "[ ].*" ""  str "${str}")
+      SET(${var} ${str})
+    ENDIF()
+  ENDIF()
 ENDMACRO()
 
 MACRO(GET_COLUMNSTORE_VERSION)
@@ -110,7 +110,6 @@ SET(CPACK_PACKAGE_NAME "mariadb-columnstore-tools")
 SET(ENGINE_ARCH "amd64")
 
 SET(CPACK_PACKAGE_FILE_NAME "${CPACK_PACKAGE_NAME}-${PACKAGE_VERSION}-${PACKAGE_RELEASE}")
-
 SET(CPACK_PACKAGE_DESCRIPTION_SUMMARY "MariaDB Columnstore: a very fast and robust SQL database server")
 SET(CPACK_PACKAGE_URL "http://www.mariadb.com")
 SET(CPACK_PACKAGE_CONTACT "MariaDB Corporation Ab")
@@ -284,7 +283,6 @@ if(WIN32)
         MESSAGE(STATUS "Found Visual Studio 2015/17 C++ Redistributable merge module: ${VS_2017_REDIST_MSM}")
         
         SET(CPACK_GENERATOR "WIX")
-		SET(CPACK_COMPONENTS_ALL "")
         SET(CPACK_RESOURCE_FILE_LICENSE "${CMAKE_CURRENT_SOURCE_DIR}/LICENSE.txt")
         SET(CPACK_WIX_UI_BANNER "${CMAKE_CURRENT_SOURCE_DIR}/resources/WixUIBannerBmp.jpg")
         SET(CPACK_WIX_UI_DIALOG "${CMAKE_CURRENT_SOURCE_DIR}/resources/WixUIDialogBmp.jpg")

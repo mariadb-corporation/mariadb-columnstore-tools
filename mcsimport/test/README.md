@@ -38,7 +38,7 @@ Here a short summary how a test can be designed.
 2) if `prepare.py` is found execute its `prepare_test()` method to create the required files (e.g. `input.csv`, `expected.csv`, `DDL.sql`, ...)
 3) if `DDL.sql` is found forward its instructions to the remote columnstore instance to prepare the test environment
 4) execute mcsimport according to its instructions in `config.yaml` and validate its return code
-5) if `expected.csv` is found validate that its number of rows matches the count(*) of rows in the columnstore table. Further validate row by row if the injected values match the expected. For large injections the test validation coverage can be adjusted with the optional test coniguration parameter `validation_coverage`.
+5) if `expected.csv` is found validate that its number of rows matches the count(*) of rows in the columnstore table. Further validate row by row if the injected values match the expected. For large injections the test validation coverage can be adjusted with the optional test configuration parameter `validation_coverage`.
 6) if `prepare.py` is found execute its `cleanup_test()` method to clean up the generated files (useful for large injections)
 
 **NOTE**  
