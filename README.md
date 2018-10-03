@@ -8,6 +8,28 @@ For more details on each tool see the README.md in each directory. For licensing
 
 ## Packaging
 
+### CMake Options
+
+Several options are available when execution CMake by using the following
+command line:
+
+```shell
+cmake -D<Variable>=<Value>
+```
+
+Alternatively you can use one of the CMake GUIs to set the options.
+
+The options are as follows:
+
+| Option | Default | Definition |
+| ------ | ------ | ---------- |
+| ``TEST_RUNNER`` | ``OFF`` | Build the test suite |
+| ``RPM`` | ``OFF`` | Build a RPM (and the OS name for the package) |
+| ``DEB`` | ``OFF`` | Build a DEB (and the OS name for the package) |
+| ``BACKUPRESTORE`` | ``ON`` | Build the backup restore tool |
+| ``MONITORING`` | ``ON`` | Build the monitoring tool |
+| ``REMOTE_CPIMPORT`` | ``ON`` | Build the remote cpimport / mcsimport tool |
+
 ### RPM
 ```bash
 mkdir build && cd build
