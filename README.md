@@ -37,7 +37,7 @@ cmake .. -DTEST_RUNNER=ON
 make -j2
 sudo make install
 ctest -V
-cmake . -DRPM=centos7
+cmake .. -DRPM=centos7
 sudo make package
 ```
 
@@ -48,7 +48,7 @@ cmake .. -DTEST_RUNNER=ON
 make -j2
 sudo make install
 ctest -V
-cmake . -DDEB=stretch
+cmake .. -DDEB=stretch
 sudo make package
 ```
 
