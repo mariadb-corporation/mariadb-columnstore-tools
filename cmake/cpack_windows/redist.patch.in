@@ -1,5 +1,6 @@
 <CPackWiXPatch>
   <CPackWiXFragment Id="#PRODUCT">
+    <!-- Install the Windows C++ Redistributable if not present -->
     <DirectoryRef Id="TARGETDIR">
         <Merge Id="VCRedist141" SourceFile="@VS_2017_REDIST_MSM@" DiskId="1" Language="0"/>
     </DirectoryRef>
@@ -21,5 +22,15 @@
         <MergeRef Id="VCRedist141"/>
         <Condition Level="0">VCREDIST140INSTALLED_X64 OR VCREDIST140INSTALLED2_X64</Condition>
     </Feature>
+    <!-- Set the PATH entry for mcsimport -->
+    <DirectoryRef Id="TARGETDIR">
+      <Component Id="McsimportPath" Guid="bf8164c6-aa72-4c61-95f5-18162f1d35ec">
+        <Environment Id="PATH" Name="PATH" Value="[CM_DP_bin]" Permanent="no" Part="last" Action="set" System="yes" />
+      </Component>
+    </DirectoryRef>
+    <Feature Id="McsimportPath" Title="Set PATH entry" Description="Set a PATH entry for mcsimport" Display="expand" Level="1">
+       <ComponentRef Id="McsimportPath" />
+    </Feature>
   </CPackWiXFragment>
 </CPackWiXPatch>
+
