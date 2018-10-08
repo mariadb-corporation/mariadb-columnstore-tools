@@ -30,7 +30,18 @@ The options are as follows:
 | ``MONITORING`` | ``ON`` | Build the monitoring tool |
 | ``REMOTE_CPIMPORT`` | ``ON`` | Build the remote cpimport / mcsimport tool |
 
-### RPM
+### CentOS 6
+**Note:** remote cpimport can't be built on CentOS 6 as it requires mcsapi that isn't available on CentOS 6.
+
+```bash
+mkdir build && cd build
+cmake .. -DREMOTE_CPIMPORT=OFF
+make
+cmake .. -DRPM=centos6
+sudo make package
+```
+
+### CentOS 7
 ```bash
 mkdir build && cd build
 cmake .. -DTEST_RUNNER=ON
