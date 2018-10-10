@@ -28,6 +28,12 @@
 *.out
 *.app
 
+# Python objects
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Misc
 mariadb-columnstore-tools-*
 CMakeCache.txt
 CMakeFiles
@@ -37,3 +43,5 @@ Makefile
 cmake_install.cmake
 install_manifest.txt
 VERSION.dep
+cmake/cpack_windows/redist.patch
+build
