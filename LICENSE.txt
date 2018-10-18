@@ -5,7 +5,7 @@ Parameters
 
 Licensor:             MariaDB Corporation Ab
 Licensed Work:        MariaDB ColumnStore Backup Tool v1.2.
-                      MariaDB ColumnStore Remote CpImport / mcsimport v1.2.
+                      MariaDB ColumnStore mcsimport v1.2.
                       The Licensed Work is (c) 2018 MariaDB Corporation Ab
 Additional Use Grant: None.
 
