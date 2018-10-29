@@ -1,4 +1,4 @@
-Following 3rd party libraries are shipped with the Windows version of remote cpimport in binary form:
+Following 3rd party libraries are shipped with the Windows version of mcsimport in binary form:
 
 === Visual C++ Redistributable for Visual Studio 2017 (x64) ===
 
