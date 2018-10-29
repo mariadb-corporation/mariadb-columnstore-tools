@@ -13,9 +13,12 @@ if [ $# -ge 1 ]; then
   if [ -d $1 ]; then
 
     # mcsimport
-    tar -rvf $tarName ./mcsimport --exclude=*.txt --exclude=*.cpp --exclude=test
-    cd $1
-    tar -rvf $DIR/$tarName ./mcsimport/mcsimport 
+    if [ -f $DIR/$1/mcsimport/mcsimport ]; then
+      tar -rvf $tarName ./mcsimport --exclude=*.txt --exclude=*.cpp --exclude=test
+      cd $1
+      tar -rvf $DIR/$tarName ./mcsimport/mcsimport
+      cd $DIR
+    fi
   else
     echo "error: specified cmake build dir $1 could't be found"
     exit 2
