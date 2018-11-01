@@ -250,7 +250,11 @@ def validateInjection(test_directory,table,validationCoverage):
         # validate that the number of rows of expected.csv and target table match
         cursor.execute("SELECT COUNT(*) AS cnt FROM %s" % (table,))
         cnt = cursor.fetchone()[0]
-        num_lines = len(list(csv.reader(open(os.path.join(test_directory,"expected.csv")))))
+        num_lines = 0
+        with open(os.path.join(test_directory,"expected.csv")) as csv_file:
+            csv_reader = csv.reader(csv_file, delimiter=',')
+            for line in csv_reader:
+                num_lines = num_lines+1
         assert num_lines == cnt, "the number of injected rows: %d doesn't match the number of expected rows: %d" % (cnt, num_lines)
         # validate that each input line in expected.csv was injected into the target table
         if validationCoverage != 0:
