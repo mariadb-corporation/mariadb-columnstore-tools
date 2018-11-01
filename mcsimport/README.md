@@ -1,4 +1,4 @@
-# MariaDB ColumnStore remote cpimport - mcsimport
+# MariaDB ColumnStore mcsimport
 
 This tool imports data from a csv file into a remote ColumnStore instance utilizing the Bulk Write SDK.
 
@@ -54,12 +54,12 @@ mkdir build && cd build
 cmake ../mariadb-columnstore-data-adapters -DBACKUPRESTORE=OFF -DMONITORING=OFF -DREMOTE_CPIMPORT=ON -G "Visual Studio 14 2015 Win64" -DTEST_RUNNER=ON
 cmake --build . --config RelWithDebInfo --target package
 ctest -C RelWithDebInfo -V
-signtool.exe sign /tr http://timestamp.digicert.com /td sha256 /fd sha256 /a "MariaDB ColumnStore Remote CpImport*-x64.msi"
+signtool.exe sign /tr http://timestamp.digicert.com /td sha256 /fd sha256 /a "MariaDB ColumnStore mcsimport-*-x64.msi"
 ```
 
 ## Usage
 ```shell
-mcsimport database table input_file [-m mapping_file] [-c Columnstore.xml] [-d delimiter] [-df date_format] [-default_non_mapped]
+mcsimport database table input_file [-m mapping_file] [-c Columnstore.xml] [-d delimiter] [-df date_format] [-default_non_mapped] [-E enclose_by_character] [-C escape_character] [-header]
 ```
 
 ### -m mapping_file
@@ -107,7 +107,16 @@ The default delimiter of the CSV input file is a comma `,` and can be changed th
 By default mcsimport uses `YYYY-MM-DD HH:MM:SS` as input date format. An individual global date format can be specified via the command line parameter -df using the [strptime] format. Column specific input date formats can be defined in the mapping file and overwrite the global date format.
 
 ### -default_non_mapped
-Remote cpimport needs to inject values for all columnstore columns. In order to use the columnstore column's default values for all non mapped target columns the global parameter `default_non_mapped` can be used. Target column specific default values in the mapping file overwrite the global default values of this parameter.
+mcsimport needs to inject values for all columnstore columns. In order to use the columnstore column's default values for all non mapped target columns the global parameter `default_non_mapped` can be used. Target column specific default values in the mapping file overwrite the global default values of this parameter.
+
+### -E enclose_by_character
+By default mcsimport uses the double-quote character `"` as enclosing character. It can be changed through the command line parameter -E. The enclosing character's length is limited to 1.
+
+### -C escape_character
+By default mcsimport uses the double-quote character `"` as escaping character. It can be changed through the command line parameter -C. The escaping character's length is limited to 1.
+
+### -header
+Choose this flag to ignore the first line of the input CSV file as header. (It won't be injected)
 
 [mcsapi]: https://github.com/mariadb-corporation/mariadb-columnstore-api
 [yaml-cpp]: https://github.com/jbeder/yaml-cpp

@@ -46,7 +46,7 @@ private:
 
 class MCSRemoteImport {
 public:
-	MCSRemoteImport(std::string input_file, std::string database, std::string table, std::string mapping_file, std::string columnStoreXML, char delimiter, std::string inputDateFormat, bool default_non_mapped) {
+	MCSRemoteImport(std::string input_file, std::string database, std::string table, std::string mapping_file, std::string columnStoreXML, char delimiter, std::string inputDateFormat, bool default_non_mapped, char escape_character, char enclose_by_character, bool header) {
 		// check if we can connect to the ColumnStore database and extract the number of columns of the target table
 		try {
 			if (columnStoreXML == "") {
@@ -66,6 +66,20 @@ public:
 			std::exit(2);
 		}
 
+		// check if delimiter and escape_character differ, and delimiter and enclose_by_character differ
+		if (delimiter == escape_character || delimiter == enclose_by_character) {
+			std::cerr << "Error: Different values need to be chosen for delimiter and enclose_by_character, and delimiter and escape_character" << std::endl;
+			std::cerr << "delimiter: " << delimiter << std::endl;
+			std::cerr << "enclose_by_character: " << enclose_by_character << std::endl;
+			std::cerr << "escape_character: " << escape_character << std::endl;
+			clean();
+			std::exit(2);
+		}
+
+		this->delimiter = delimiter;
+		this->escape_character = escape_character;
+		this->enclose_by_character = enclose_by_character;
+
 		// check if the source csv file exists and extract the number of columns of its first row
 		std::ifstream csvFile(input_file);
 		if (!csvFile) {
@@ -73,33 +87,51 @@ public:
 			clean();
 			std::exit(2);
 		}
-		std::string firstLine;
-		std::getline(csvFile, firstLine);
-		csvFile.close();
-		int32_t csv_first_row_number_of_columns = std::count(firstLine.begin(), firstLine.end(), delimiter) + 1;
+		std::ifstream csvFileStream(input_file);
+		std::vector<std::string> csv_header_fields;
+		getNextCsvFields(csvFileStream, csv_header_fields);
+		if (!csvFileStream.eof()) {
+			csvFileStream.close();
+		}
+		this->number_of_csv_columns = csv_header_fields.size();
+		if (header) {
+			this->csv_header_field_names = csv_header_fields;
+		}
 		this->input_file = input_file;
-		this->delimiter = delimiter;
 		this->inputDateFormat = inputDateFormat;
+		this->header = header;
 
-		if (mapping_file == "") {// if no mapping file was provided use implicit mapping of columnstore_column to csv_column
-			generateImplicitMapping(csv_first_row_number_of_columns, default_non_mapped);
+		if (mapping_file == "") { // if no mapping file was provided use implicit mapping of columnstore_column to csv_column
+			generateImplicitMapping(this->number_of_csv_columns, default_non_mapped);
 		}
 		else { // if a mapping file was provided infer the mapping from the mapping file
-			generateExplicitMapping(csv_first_row_number_of_columns, default_non_mapped, mapping_file);
+			generateExplicitMapping(this->number_of_csv_columns, default_non_mapped, mapping_file);
 		}
 	}
 	int32_t import() {
 		try {
-			std::ifstream csvFile(this->input_file);
-			std::string rowLine;
-			while (std::getline(csvFile, rowLine)) {
-				//remove '/r' line ending from Windows files
-				if (rowLine.size() && rowLine[rowLine.size() - 1] == '\r') {
-					rowLine = rowLine.substr(0, rowLine.size() - 1);
+			std::ifstream csvFileStream(this->input_file);
+			std::vector<std::string> parsed_csv_fields;
+			// ignore the first line if it is the header
+			if (header) {
+				getNextCsvFields(csvFileStream, parsed_csv_fields);
+			}
+			while (getNextCsvFields(csvFileStream, parsed_csv_fields)){
+				//throw an exception and rollback the transaction if the parsed csv vector has not the exact number of fields as specified
+ 				if (parsed_csv_fields.size() != this->number_of_csv_columns) {
+					std::string errorMsg = "csv input parse error: the csv input file's columns of: " + std::to_string(parsed_csv_fields.size()) + " doesn't match the expected column count of the first line of: " + std::to_string(number_of_csv_columns) + "\nvalues:";
+					if (parsed_csv_fields.size() > 0) {
+						for (int i = 0; i < parsed_csv_fields.size(); i++) {
+							errorMsg.append(parsed_csv_fields[i] + ", ");
+						}
+						errorMsg = errorMsg.substr(0, errorMsg.size() - 2);
+					}
+					throw std::range_error(errorMsg);
 				}
-				std::vector<std::string> splittedRowLine = split(rowLine, this->delimiter);
+				// inject the values into the cs table
 				for (int32_t col = 0; col < this->cs_table_columns; col++) {
 					int32_t csvColumn = this->mapping[col];
+					// set default values
 					if (csvColumn == CUSTOM_DEFAULT_VALUE || csvColumn == COLUMNSTORE_DEFAULT_VALUE) {
 						if (customDefaultValue[col] == "" && this->tab.getColumn(col).isNullable()) {
 							bulk->setNull(col);
@@ -107,25 +139,26 @@ public:
 							bulk->setColumn(col, customDefaultValue[col]);
 						}
 					}
-					else if (csvColumn <= splittedRowLine.size() - 1 && (std::string) splittedRowLine[csvColumn] != "") { //last rowLine entry could be NULL and therefore not in the vector
+					// set values from csv vector
+					else {
+						// if the vector contains an empty value insert it as NULL
+						if (parsed_csv_fields[csvColumn] == "") {
+							bulk->setNull(col);
+						}
 						// if an (custom) input date format is specified and the target column is of type DATE or DATETIME, transform the input to ColumnStoreDateTime and inject it
-						if ((this->customInputDateFormat.find(col) != this->customInputDateFormat.end() || this->inputDateFormat != "") && (tab.getColumn(col).getType() == mcsapi::DATA_TYPE_DATE || tab.getColumn(col).getType() == mcsapi::DATA_TYPE_DATETIME)) {
+						else if ((this->customInputDateFormat.find(col) != this->customInputDateFormat.end() || this->inputDateFormat != "") && (tab.getColumn(col).getType() == mcsapi::DATA_TYPE_DATE || tab.getColumn(col).getType() == mcsapi::DATA_TYPE_DATETIME)) {
 							if (this->customInputDateFormat.find(col) != this->customInputDateFormat.end()) {
-								mcsapi::ColumnStoreDateTime dt = mcsapi::ColumnStoreDateTime((std::string) splittedRowLine[csvColumn], this->customInputDateFormat[col]);
+								mcsapi::ColumnStoreDateTime dt = mcsapi::ColumnStoreDateTime((std::string) parsed_csv_fields[csvColumn], this->customInputDateFormat[col]);
 								bulk->setColumn(col, dt);
 							}
 							else {
-								mcsapi::ColumnStoreDateTime dt = mcsapi::ColumnStoreDateTime((std::string) splittedRowLine[csvColumn], this->inputDateFormat);
+								mcsapi::ColumnStoreDateTime dt = mcsapi::ColumnStoreDateTime((std::string) parsed_csv_fields[csvColumn], this->inputDateFormat);
 								bulk->setColumn(col, dt);
 							}
 						}
 						else { // otherwise just inject the plain value as string
-							bulk->setColumn(col, (std::string) splittedRowLine[csvColumn]);
+							bulk->setColumn(col, (std::string) parsed_csv_fields[csvColumn]);
 						}
-					}
-					else 
-					{
-						bulk->setNull(col);
 					}
 				}
 				bulk->writeRow();
@@ -156,13 +189,21 @@ private:
 	mcsapi::ColumnStoreSystemCatalogTable tab;
 	std::string input_file;
 	std::string inputDateFormat;
+	bool header;
 	char delimiter;
+	char escape_character;
+	char enclose_by_character;
 	int32_t cs_table_columns = -1;
+	int32_t number_of_csv_columns = -1;
+	std::vector<std::string> csv_header_field_names;
 	enum mapping_codes {COLUMNSTORE_DEFAULT_VALUE=-1, CUSTOM_DEFAULT_VALUE=-2};
 	std::map<int32_t, int32_t> mapping; // columnstore_column #, csv_column # or item of mapping_codes
 	std::map<int32_t, std::string> customInputDateFormat; //columnstore_column #, csv_input_date_format
 	std::map<int32_t, std::string> customDefaultValue; // columnstore_column #, custom_default_value
 
+	/**
+	* Generates an implicit 1:1 mapping of csv columns to cs columns
+	*/
 	void generateImplicitMapping(int32_t csv_first_row_number_of_columns, bool default_non_mapped) {
 		// check the column sizes of csv input and columnstore target for compatibility
 		if (csv_first_row_number_of_columns < this->cs_table_columns && !default_non_mapped) {
@@ -192,6 +233,9 @@ private:
 		}
 	}
 
+	/**
+	* Generates an explicit mapping of cs to csv columns using the mapping file
+	*/
 	void generateExplicitMapping(int32_t csv_first_row_number_of_columns, bool default_non_mapped, std::string mapping_file) {
 
 		// check if the mapping file exists
@@ -346,19 +390,91 @@ private:
 		return -1;
 	}
 
-	template<typename Out>
-	void split(const std::string &s, char delim, Out result) {
-		std::stringstream ss(s);
-		std::string item;
-		while (std::getline(ss, item, delim)) {
-			*(result++) = item;
+	/*
+	* splits the csv file stream into a vector of parsed csv fields. returns true if the file stream is still readable, otherwise false.
+	*/
+	bool getNextCsvFields(std::ifstream& stream, std::vector<std::string>& parsed_csv_fields)
+	{
+		if (stream.eof()) {
+			return false;
 		}
-	}
+		parsed_csv_fields.clear();
+		std::string field;
+		bool withInEnclosed = false;
+		bool lastCharWasEscapeChar = false;
+		char ch;
+		while (stream.get(ch)) {
+			if (withInEnclosed) {
+				if (lastCharWasEscapeChar) {
+					// enclose by character found
+					if (ch == enclose_by_character) {
+						field.push_back(enclose_by_character);
+					}
+					// escape character found
+					else if (ch == escape_character) {
+						field.push_back(escape_character);
+					}
+					// in case enclose by and escape character are the same and no second enclose by char was found we have to end the enclosed by here
+					else if (enclose_by_character == escape_character) {
+						withInEnclosed = false;
+						stream.putback(ch);
+					}
+					// otherwise add escape character and current character to field
+					else {
+						field.push_back(escape_character);
+						field.push_back(ch);
+					}
+					lastCharWasEscapeChar = false;
+				}
+				else {
+					// escape character found
+					if (ch == escape_character) {
+						lastCharWasEscapeChar = true;
+					}
+					// enclose by character found
+					else if (ch == enclose_by_character) {
+						withInEnclosed = false;
+					}
+					// otherwise just add the char to the field
+					else {
+						field.push_back(ch);
+					}
+				}
+			}
+			else {
+				// delimiter found
+				if (ch == delimiter) {
+					parsed_csv_fields.push_back(field);
+					field.clear();
+				}
+				// endline found
+				else if (ch == '\n') {
+					// remove Windows line ending
+					if (field.size() && field[field.size() - 1] == '\r') {
+						field = field.substr(0, field.size() - 1);
+					}
+					parsed_csv_fields.push_back(field);
+					break;
+				}
+				// enclose by character found
+				else if (ch == enclose_by_character) {
+					withInEnclosed = true;
+				}
+				else {
+					field.push_back(ch);
+				}
+			}
+		}
+		// submit the last field if the file ended without newline
+		if (stream.eof() && (field.size() > 0  || parsed_csv_fields.size() > 0)) {
+			parsed_csv_fields.push_back(field);
+		}
+		// return false if file ends with an empty line
+		else if(stream.eof()) {
+			return false;
+		}
 
-	std::vector<std::string> split(const std::string &s, char delim) {
-		std::vector<std::string> elems;
-		split(s, delim, std::back_inserter(elems));
-		return elems;
+		return true;
 	}
 
 	void clean() {
@@ -371,7 +487,7 @@ int main(int argc, char* argv[])
 {
 	// Check if the command line arguments are valid
 	if (argc < 4) {
-		std::cerr << "Usage: " << argv[0] << " database table input_file [-m mapping_file] [-c Columnstore.xml] [-d delimiter] [-df date_format] [-default_non_mapped]" << std::endl;
+		std::cerr << "Usage: " << argv[0] << " database table input_file [-m mapping_file] [-c Columnstore.xml] [-d delimiter] [-df date_format] [-default_non_mapped] [-E enclose_by_character] [-C escape_character] [-header]" << std::endl;
 		return 1;
 	}
 
@@ -381,7 +497,10 @@ int main(int argc, char* argv[])
 	std::string columnStoreXML;
 	std::string inputDateFormat;
 	bool default_non_mapped = false;
+	bool header = false;
 	char delimiter = ',';
+	char escape_character = '"';
+	char enclose_by_character = '"';
 	if (input.cmdOptionExists("-m")) {
 		mappingFile = input.getCmdOption("-m");
 	}
@@ -396,14 +515,32 @@ int main(int argc, char* argv[])
 		}
 		delimiter = delimiterString[0];
 	}
+	if (input.cmdOptionExists("-C")) {
+		std::string escapeString = input.getCmdOption("-C");
+		if (escapeString.length() != 1) {
+			std::cerr << "Error: Escape character needs to be one character. Current length: " << escapeString.length() << std::endl;
+			return 2;
+		}
+		escape_character = escapeString[0];
+	}
+	if (input.cmdOptionExists("-E")) {
+		std::string encloseByString = input.getCmdOption("-E");
+		if (encloseByString.length() != 1) {
+			std::cerr << "Error: Enclose by character needs to be one character. Current length: " << encloseByString.length() << std::endl;
+			return 2;
+		}
+		enclose_by_character = encloseByString[0];
+	}
 	if (input.cmdOptionExists("-df")) {
 		inputDateFormat = input.getCmdOption("-df");
 	}
 	if (input.cmdOptionExists("-default_non_mapped")) {
 		default_non_mapped = true;
 	}
-	MCSRemoteImport* mcsimport = new MCSRemoteImport(argv[3], argv[1], argv[2], mappingFile, columnStoreXML, delimiter, inputDateFormat, default_non_mapped);
+	if (input.cmdOptionExists("-header")) {
+		header = true;
+	}
+	MCSRemoteImport* mcsimport = new MCSRemoteImport(argv[3], argv[1], argv[2], mappingFile, columnStoreXML, delimiter, inputDateFormat, default_non_mapped, escape_character, enclose_by_character, header);
 	int32_t rtn = mcsimport->import();
 	return rtn;
 }
-

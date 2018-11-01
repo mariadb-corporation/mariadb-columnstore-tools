@@ -154,6 +154,12 @@ def loadTestConfig(test_directory):
             raise Exception("test's coverage value: %s is invalid" %(validation_coverage,))
     else:
         testConfig["validation_coverage"] = None
+    if not "header" in testConfig:
+        testConfig["header"] = False
+    if not "enclosing_character" in testConfig:
+        testConfig["enclosing_character"] = None
+    if not "escaping_character" in testConfig:
+        testConfig["escaping_character"] = None
     return testConfig
     
 # executes the SQL statements of given file to set up the test table
@@ -207,6 +213,14 @@ def executeMcsimport(test_directory,testConfig):
         cmd.append("%s" % (testConfig["date_format"],))
     if testConfig["default_non_mapped"]:
         cmd.append("-default_non_mapped")
+    if testConfig["header"]:
+        cmd.append("-header")
+    if testConfig["enclosing_character"] is not None:
+        cmd.append("-E")
+        cmd.append("%s" % (testConfig["enclosing_character"]))
+    if testConfig["escaping_character"] is not None:
+        cmd.append("-C")
+        cmd.append("%s" % (testConfig["escaping_character"]))
     
     print("Execute mcsimport: %s" % (cmd,))
     try:
@@ -236,7 +250,7 @@ def validateInjection(test_directory,table,validationCoverage):
         # validate that the number of rows of expected.csv and target table match
         cursor.execute("SELECT COUNT(*) AS cnt FROM %s" % (table,))
         cnt = cursor.fetchone()[0]
-        num_lines = sum(1 for line in open(os.path.realpath(os.path.join(test_directory,"expected.csv"))))
+        num_lines = len(list(csv.reader(open(os.path.join(test_directory,"expected.csv")))))
         assert num_lines == cnt, "the number of injected rows: %d doesn't match the number of expected rows: %d" % (cnt, num_lines)
         # validate that each input line in expected.csv was injected into the target table
         if validationCoverage != 0:
@@ -289,3 +303,4 @@ def cleanUpColumnstoreTable(table):
     
 # execute the test suite
 executeTestSuite()
+
