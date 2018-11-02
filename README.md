@@ -64,7 +64,7 @@ sudo make package
 ```
 
 ### MSI
-Currently only remote cpimport / mcsimport can be built and used on Windows.
+Currently only mcsimport can be built and used on Windows.
 
 To compile it you first have to install the Windows version of mcsapi and set the environment variable `MCSAPI_INSTALL_DIR` to its top level installation directory.
 
@@ -74,7 +74,7 @@ mkdir build && cd build
 cmake -DTEST_RUNNER=ON -G "Visual Studio 14 2015 Win64" ..
 cmake --build . --config RelWithDebInfo --target package
 ctest -C RelWithDebInfo -V
-signtool.exe sign /tr http://timestamp.digicert.com /td sha256 /fd sha256 /a "MariaDB ColumnStore Remote CpImport-*-x64.msi"
+signtool.exe sign /tr http://timestamp.digicert.com /td sha256 /fd sha256 /a "MariaDB ColumnStore mcsimport-*-x64.msi"
 ```
 **NOTE**  
 For testing you have to set the environment variables `MCSAPI_CS_TEST_IP`, `MCSAPI_CS_TEST_PASSWORD`, `MCSAPI_CS_TEST_USER`, and `COLUMNSTORE_INSTALL_DIR`. Please see the additional instructions in mcsimport's sub-directory.
