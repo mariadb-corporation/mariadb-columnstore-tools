@@ -20,6 +20,7 @@
 #include <map>
 #include <libmcsapi/mcsapi.h>
 #include <yaml-cpp/yaml.h>
+#include <chrono>
 
 class InputParser {
 public:
@@ -46,7 +47,7 @@ private:
 
 class MCSRemoteImport {
 public:
-	MCSRemoteImport(std::string input_file, std::string database, std::string table, std::string mapping_file, std::string columnStoreXML, char delimiter, std::string inputDateFormat, bool default_non_mapped, char escape_character, char enclose_by_character, bool header) {
+	MCSRemoteImport(std::string input_file, std::string database, std::string table, std::string mapping_file, std::string columnStoreXML, char delimiter, std::string inputDateFormat, bool default_non_mapped, char escape_character, char enclose_by_character, bool header, bool error_log) {
 		// check if we can connect to the ColumnStore database and extract the number of columns of the target table
 		try {
 			if (columnStoreXML == "") {
@@ -101,6 +102,20 @@ public:
 		this->inputDateFormat = inputDateFormat;
 		this->header = header;
 
+		// check if there is no logging file and if mcsimport is able to create one
+		if (error_log) {
+			std::chrono::milliseconds ms = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::system_clock::now().time_since_epoch());
+			std::string errFile = input_file + "." + std::to_string(ms.count()) + ".err";
+			this->errFileStream.open(errFile);
+			if (!this->errFileStream) {
+				std::cerr << "Error: Can't write to error file: " << errFile << std::endl;
+				clean();
+				std::exit(2);
+			}
+			this->errFileStream << "error_type, column_nr, parsed_raw_row_values" << std::endl;
+		}
+		this->error_log = error_log;
+
 		if (mapping_file == "") { // if no mapping file was provided use implicit mapping of columnstore_column to csv_column
 			generateImplicitMapping(this->number_of_csv_columns, default_non_mapped);
 		}
@@ -109,6 +124,7 @@ public:
 		}
 	}
 	int32_t import() {
+		std::ofstream errFile;
 		try {
 			std::ifstream csvFileStream(this->input_file);
 			std::vector<std::string> parsed_csv_fields;
@@ -116,6 +132,7 @@ public:
 			if (header) {
 				getNextCsvFields(csvFileStream, parsed_csv_fields);
 			}
+			mcsapi::columnstore_data_convert_status_t status;
 			while (getNextCsvFields(csvFileStream, parsed_csv_fields)){
 				//throw an exception and rollback the transaction if the parsed csv vector has not the exact number of fields as specified
  				if (parsed_csv_fields.size() != this->number_of_csv_columns) {
@@ -134,31 +151,56 @@ public:
 					// set default values
 					if (csvColumn == CUSTOM_DEFAULT_VALUE || csvColumn == COLUMNSTORE_DEFAULT_VALUE) {
 						if (customDefaultValue[col] == "" && this->tab.getColumn(col).isNullable()) {
-							bulk->setNull(col);
+							bulk->setNull(col, &status);
 						} else{
-							bulk->setColumn(col, customDefaultValue[col]);
+							bulk->setColumn(col, customDefaultValue[col], &status);
 						}
 					}
 					// set values from csv vector
 					else {
 						// if the vector contains an empty value insert it as NULL
 						if (parsed_csv_fields[csvColumn] == "") {
-							bulk->setNull(col);
+							bulk->setNull(col, &status);
 						}
 						// if an (custom) input date format is specified and the target column is of type DATE or DATETIME, transform the input to ColumnStoreDateTime and inject it
 						else if ((this->customInputDateFormat.find(col) != this->customInputDateFormat.end() || this->inputDateFormat != "") && (tab.getColumn(col).getType() == mcsapi::DATA_TYPE_DATE || tab.getColumn(col).getType() == mcsapi::DATA_TYPE_DATETIME)) {
 							if (this->customInputDateFormat.find(col) != this->customInputDateFormat.end()) {
 								mcsapi::ColumnStoreDateTime dt = mcsapi::ColumnStoreDateTime((std::string) parsed_csv_fields[csvColumn], this->customInputDateFormat[col]);
-								bulk->setColumn(col, dt);
+								bulk->setColumn(col, dt, &status);
 							}
 							else {
 								mcsapi::ColumnStoreDateTime dt = mcsapi::ColumnStoreDateTime((std::string) parsed_csv_fields[csvColumn], this->inputDateFormat);
-								bulk->setColumn(col, dt);
+								bulk->setColumn(col, dt, &status);
 							}
 						}
 						else { // otherwise just inject the plain value as string
-							bulk->setColumn(col, (std::string) parsed_csv_fields[csvColumn]);
+							bulk->setColumn(col, (std::string) parsed_csv_fields[csvColumn], &status);
 						}
+					}
+					if (error_log && status != mcsapi::CONVERT_STATUS_NONE) {
+						//log the value and line that was saturated, invalid or truncated
+						std::string statusValue;
+						switch (status) {
+						case mcsapi::CONVERT_STATUS_SATURATED:
+							statusValue = "SATURATED";
+							break;
+						case mcsapi::CONVERT_STATUS_INVALID:
+							statusValue = "INVALID";
+							break;
+						case mcsapi::CONVERT_STATUS_TRUNCATED:
+							statusValue = "TRUNCATED";
+							break;
+						default:
+							statusValue = "UNKNOWN";
+						}
+						std::string parsed_raw_csv_field_string;
+						for (auto const& s : parsed_csv_fields) {
+							parsed_raw_csv_field_string += s+","; 
+						}
+						if (parsed_raw_csv_field_string.size() > 0) {
+							parsed_raw_csv_field_string = parsed_raw_csv_field_string.substr(0, parsed_raw_csv_field_string.size() - 1);
+						}
+						this->errFileStream << statusValue << ", " << csvColumn << ", " << parsed_raw_csv_field_string << std::endl;
 					}
 				}
 				bulk->writeRow();
@@ -188,8 +230,10 @@ private:
 	mcsapi::ColumnStoreSystemCatalog cat;
 	mcsapi::ColumnStoreSystemCatalogTable tab;
 	std::string input_file;
+	std::ofstream errFileStream;
 	std::string inputDateFormat;
 	bool header;
+	bool error_log;
 	char delimiter;
 	char escape_character;
 	char enclose_by_character;
@@ -478,6 +522,9 @@ private:
 	}
 
 	void clean() {
+		if (this->errFileStream.is_open()) {
+			this->errFileStream.close();
+		}
 		delete this->bulk;
 		delete this->driver;
 	}
@@ -487,7 +534,7 @@ int main(int argc, char* argv[])
 {
 	// Check if the command line arguments are valid
 	if (argc < 4) {
-		std::cerr << "Usage: " << argv[0] << " database table input_file [-m mapping_file] [-c Columnstore.xml] [-d delimiter] [-df date_format] [-default_non_mapped] [-E enclose_by_character] [-C escape_character] [-header]" << std::endl;
+		std::cerr << "Usage: " << argv[0] << " database table input_file [-m mapping_file] [-c Columnstore.xml] [-d delimiter] [-df date_format] [-default_non_mapped] [-E enclose_by_character] [-C escape_character] [-header] [-err_log]" << std::endl;
 		return 1;
 	}
 
@@ -498,6 +545,7 @@ int main(int argc, char* argv[])
 	std::string inputDateFormat;
 	bool default_non_mapped = false;
 	bool header = false;
+	bool error_log = false;
 	char delimiter = ',';
 	char escape_character = '"';
 	char enclose_by_character = '"';
@@ -540,7 +588,11 @@ int main(int argc, char* argv[])
 	if (input.cmdOptionExists("-header")) {
 		header = true;
 	}
-	MCSRemoteImport* mcsimport = new MCSRemoteImport(argv[3], argv[1], argv[2], mappingFile, columnStoreXML, delimiter, inputDateFormat, default_non_mapped, escape_character, enclose_by_character, header);
+	if (input.cmdOptionExists("-err_log")) {
+		error_log = true;
+	}
+	MCSRemoteImport* mcsimport = new MCSRemoteImport(argv[3], argv[1], argv[2], mappingFile, columnStoreXML, delimiter, inputDateFormat, default_non_mapped, escape_character, enclose_by_character, header, error_log);
 	int32_t rtn = mcsimport->import();
 	return rtn;
 }
+
