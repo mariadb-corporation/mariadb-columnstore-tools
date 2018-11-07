@@ -47,7 +47,7 @@ private:
 
 class MCSRemoteImport {
 public:
-	MCSRemoteImport(std::string input_file, std::string database, std::string table, std::string mapping_file, std::string columnStoreXML, char delimiter, std::string inputDateFormat, bool default_non_mapped, char escape_character, char enclose_by_character, bool header, bool error_log) {
+	MCSRemoteImport(std::string input_file, std::string database, std::string table, std::string mapping_file, std::string columnStoreXML, char delimiter, std::string inputDateFormat, bool default_non_mapped, char escape_character, char enclose_by_character, bool header, bool error_log, std::int32_t nullOption, bool ignore_malformed_csv) {
 		// check if we can connect to the ColumnStore database and extract the number of columns of the target table
 		try {
 			if (columnStoreXML == "") {
@@ -80,6 +80,8 @@ public:
 		this->delimiter = delimiter;
 		this->escape_character = escape_character;
 		this->enclose_by_character = enclose_by_character;
+		this->nullOption = nullOption;
+		this->ignore_malformed_csv = ignore_malformed_csv;
 
 		// check if the source csv file exists and extract the number of columns of its first row
 		std::ifstream csvFile(input_file);
@@ -125,6 +127,7 @@ public:
 	}
 	int32_t import() {
 		std::ofstream errFile;
+		std::uint64_t ignored_malformed_csv_lines = 0;
 		try {
 			std::ifstream csvFileStream(this->input_file);
 			std::vector<std::string> parsed_csv_fields;
@@ -134,9 +137,9 @@ public:
 			}
 			mcsapi::columnstore_data_convert_status_t status;
 			while (getNextCsvFields(csvFileStream, parsed_csv_fields)){
-				//throw an exception and rollback the transaction if the parsed csv vector has not the exact number of fields as specified
- 				if (parsed_csv_fields.size() != this->number_of_csv_columns) {
-					std::string errorMsg = "csv input parse error: the csv input file's columns of: " + std::to_string(parsed_csv_fields.size()) + " doesn't match the expected column count of the first line of: " + std::to_string(number_of_csv_columns) + "\nvalues:";
+				//throw an exception and rollback the transaction if the parsed csv vector has not the exact number of fields as specified and ignore_malformed_csv is false
+ 				if (parsed_csv_fields.size() != this->number_of_csv_columns && !ignore_malformed_csv) {
+					std::string errorMsg = "csv input parse error: the csv input file's columns of: " + std::to_string(parsed_csv_fields.size()) + " doesn't match the expected column count of the first line of: " + std::to_string(number_of_csv_columns) + "\nvalues: ";
 					if (parsed_csv_fields.size() > 0) {
 						for (int i = 0; i < parsed_csv_fields.size(); i++) {
 							errorMsg.append(parsed_csv_fields[i] + ", ");
@@ -145,65 +148,70 @@ public:
 					}
 					throw std::range_error(errorMsg);
 				}
-				// inject the values into the cs table
-				for (int32_t col = 0; col < this->cs_table_columns; col++) {
-					int32_t csvColumn = this->mapping[col];
-					// set default values
-					if (csvColumn == CUSTOM_DEFAULT_VALUE || csvColumn == COLUMNSTORE_DEFAULT_VALUE) {
-						if (customDefaultValue[col] == "" && this->tab.getColumn(col).isNullable()) {
-							bulk->setNull(col, &status);
-						} else{
-							bulk->setColumn(col, customDefaultValue[col], &status);
-						}
-					}
-					// set values from csv vector
-					else {
-						// if the vector contains an empty value insert it as NULL
-						if (parsed_csv_fields[csvColumn] == "") {
-							bulk->setNull(col, &status);
-						}
-						// if an (custom) input date format is specified and the target column is of type DATE or DATETIME, transform the input to ColumnStoreDateTime and inject it
-						else if ((this->customInputDateFormat.find(col) != this->customInputDateFormat.end() || this->inputDateFormat != "") && (tab.getColumn(col).getType() == mcsapi::DATA_TYPE_DATE || tab.getColumn(col).getType() == mcsapi::DATA_TYPE_DATETIME)) {
-							if (this->customInputDateFormat.find(col) != this->customInputDateFormat.end()) {
-								mcsapi::ColumnStoreDateTime dt = mcsapi::ColumnStoreDateTime((std::string) parsed_csv_fields[csvColumn], this->customInputDateFormat[col]);
-								bulk->setColumn(col, dt, &status);
-							}
-							else {
-								mcsapi::ColumnStoreDateTime dt = mcsapi::ColumnStoreDateTime((std::string) parsed_csv_fields[csvColumn], this->inputDateFormat);
-								bulk->setColumn(col, dt, &status);
-							}
-						}
-						else { // otherwise just inject the plain value as string
-							bulk->setColumn(col, (std::string) parsed_csv_fields[csvColumn], &status);
-						}
-					}
-					if (error_log && status != mcsapi::CONVERT_STATUS_NONE) {
-						//log the value and line that was saturated, invalid or truncated
-						std::string statusValue;
-						switch (status) {
-						case mcsapi::CONVERT_STATUS_SATURATED:
-							statusValue = "SATURATED";
-							break;
-						case mcsapi::CONVERT_STATUS_INVALID:
-							statusValue = "INVALID";
-							break;
-						case mcsapi::CONVERT_STATUS_TRUNCATED:
-							statusValue = "TRUNCATED";
-							break;
-						default:
-							statusValue = "UNKNOWN";
-						}
-						std::string parsed_raw_csv_field_string;
-						for (auto const& s : parsed_csv_fields) {
-							parsed_raw_csv_field_string += s+","; 
-						}
-						if (parsed_raw_csv_field_string.size() > 0) {
-							parsed_raw_csv_field_string = parsed_raw_csv_field_string.substr(0, parsed_raw_csv_field_string.size() - 1);
-						}
-						this->errFileStream << statusValue << ", " << csvColumn << ", " << parsed_raw_csv_field_string << std::endl;
+				//ignore the csv line if the parsed csv vector has not the exact number of fields as specified and ignore_malformed_csv is true
+				else if (parsed_csv_fields.size() != this->number_of_csv_columns && ignore_malformed_csv) {
+					ignored_malformed_csv_lines++;
+					if (error_log) {
+						std::string parsed_raw_csv_field_string = vectorToString(parsed_csv_fields);
+						this->errFileStream << "MALFORMED_CSV_LINE, -1, " << parsed_raw_csv_field_string << std::endl;
 					}
 				}
-				bulk->writeRow();
+				// otherwise inject the values into the cs table
+				else {
+					for (int32_t col = 0; col < this->cs_table_columns; col++) {
+						int32_t csvColumn = this->mapping[col];
+						// set default values
+						if (csvColumn == CUSTOM_DEFAULT_VALUE || csvColumn == COLUMNSTORE_DEFAULT_VALUE) {
+							if ((customDefaultValue[col] == "" && this->tab.getColumn(col).isNullable()) || (this->nullOption == 1 && customDefaultValue[col] == "NULL" && this->tab.getColumn(col).isNullable())) {
+								bulk->setNull(col, &status);
+							}
+							else {
+								bulk->setColumn(col, customDefaultValue[col], &status);
+							}
+						}
+						// set values from csv vector
+						else {
+							// if the vector contains an empty value insert it as NULL
+							if ((parsed_csv_fields[csvColumn] == "") || (this->nullOption == 1 && parsed_csv_fields[csvColumn] == "NULL")) {
+								bulk->setNull(col, &status);
+							}
+							// if an (custom) input date format is specified and the target column is of type DATE or DATETIME, transform the input to ColumnStoreDateTime and inject it
+							else if ((this->customInputDateFormat.find(col) != this->customInputDateFormat.end() || this->inputDateFormat != "") && (tab.getColumn(col).getType() == mcsapi::DATA_TYPE_DATE || tab.getColumn(col).getType() == mcsapi::DATA_TYPE_DATETIME)) {
+								if (this->customInputDateFormat.find(col) != this->customInputDateFormat.end()) {
+									mcsapi::ColumnStoreDateTime dt = mcsapi::ColumnStoreDateTime((std::string) parsed_csv_fields[csvColumn], this->customInputDateFormat[col]);
+									bulk->setColumn(col, dt, &status);
+								}
+								else {
+									mcsapi::ColumnStoreDateTime dt = mcsapi::ColumnStoreDateTime((std::string) parsed_csv_fields[csvColumn], this->inputDateFormat);
+									bulk->setColumn(col, dt, &status);
+								}
+							}
+							else { // otherwise just inject the plain value as string
+								bulk->setColumn(col, (std::string) parsed_csv_fields[csvColumn], &status);
+							}
+						}
+						if (error_log && status != mcsapi::CONVERT_STATUS_NONE) {
+							//log the value and line that was saturated, invalid or truncated
+							std::string statusValue;
+							switch (status) {
+							case mcsapi::CONVERT_STATUS_SATURATED:
+								statusValue = "SATURATED";
+								break;
+							case mcsapi::CONVERT_STATUS_INVALID:
+								statusValue = "INVALID";
+								break;
+							case mcsapi::CONVERT_STATUS_TRUNCATED:
+								statusValue = "TRUNCATED";
+								break;
+							default:
+								statusValue = "UNKNOWN";
+							}
+							std::string parsed_raw_csv_field_string = vectorToString(parsed_csv_fields);
+							this->errFileStream << statusValue << ", " << csvColumn << ", " << parsed_raw_csv_field_string << std::endl;
+						}
+					}
+					bulk->writeRow();
+				}
 			}
 			bulk->commit();
 		}
@@ -220,6 +228,9 @@ public:
 		std::cout << "Truncation count: " << sum.getTruncationCount() << std::endl;
 		std::cout << "Saturated count: " << sum.getSaturatedCount() << std::endl;
 		std::cout << "Invalid count: " << sum.getInvalidCount() << std::endl;
+		if (ignored_malformed_csv_lines) {
+			std::cout << "Ignored malformed csv count: " << ignored_malformed_csv_lines << std::endl;
+		}
 
 		clean();
 		return 0;
@@ -234,9 +245,11 @@ private:
 	std::string inputDateFormat;
 	bool header;
 	bool error_log;
+	bool ignore_malformed_csv;
 	char delimiter;
 	char escape_character;
 	char enclose_by_character;
+	std::int32_t nullOption;
 	int32_t cs_table_columns = -1;
 	int32_t number_of_csv_columns = -1;
 	std::vector<std::string> csv_header_field_names;
@@ -521,6 +534,20 @@ private:
 		return true;
 	}
 
+	/**
+	* Concatenates a vector of strings to a single string
+	*/
+	std::string vectorToString(std::vector <std::string> parsed_csv_fields) {
+		std::string parsed_raw_csv_field_string;
+		for (auto const& s : parsed_csv_fields) {
+			parsed_raw_csv_field_string += s + ",";
+		}
+		if (parsed_raw_csv_field_string.size() > 0) {
+			parsed_raw_csv_field_string = parsed_raw_csv_field_string.substr(0, parsed_raw_csv_field_string.size() - 1);
+		}
+		return parsed_raw_csv_field_string;
+	}
+
 	void clean() {
 		if (this->errFileStream.is_open()) {
 			this->errFileStream.close();
@@ -534,7 +561,7 @@ int main(int argc, char* argv[])
 {
 	// Check if the command line arguments are valid
 	if (argc < 4) {
-		std::cerr << "Usage: " << argv[0] << " database table input_file [-m mapping_file] [-c Columnstore.xml] [-d delimiter] [-df date_format] [-default_non_mapped] [-E enclose_by_character] [-C escape_character] [-header] [-err_log]" << std::endl;
+		std::cerr << "Usage: " << argv[0] << " database table input_file [-m mapping_file] [-c Columnstore.xml] [-d delimiter] [-df date_format] [-n null_option] [-default_non_mapped] [-E enclose_by_character] [-C escape_character] [-header] [-ignore_malformed_csv] [-err_log]" << std::endl;
 		return 1;
 	}
 
@@ -543,7 +570,9 @@ int main(int argc, char* argv[])
 	std::string mappingFile;
 	std::string columnStoreXML;
 	std::string inputDateFormat;
+	std::int32_t nullOption = 0;
 	bool default_non_mapped = false;
+	bool ignore_malformed_csv = false;
 	bool header = false;
 	bool error_log = false;
 	char delimiter = ',';
@@ -562,6 +591,19 @@ int main(int argc, char* argv[])
 			return 2;
 		}
 		delimiter = delimiterString[0];
+	}
+	if (input.cmdOptionExists("-n")) {
+		try {
+			nullOption = std::stoi(input.getCmdOption("-n"));
+			if (nullOption < 0 || nullOption > 1) {
+				std::cerr << "Error: The given null option parameter is out of range. Currently only values 0 [NULL string as data] and 1 [NULL string as NULL value] are supported." << std::endl;
+				return 2;
+			}
+		}
+		catch (std::exception&) {
+			std::cerr << "Error: Couldn't parse null option parameter to an integer" << std::endl;
+			return 2;
+		}
 	}
 	if (input.cmdOptionExists("-C")) {
 		std::string escapeString = input.getCmdOption("-C");
@@ -588,10 +630,13 @@ int main(int argc, char* argv[])
 	if (input.cmdOptionExists("-header")) {
 		header = true;
 	}
+	if (input.cmdOptionExists("-ignore_malformed_csv")) {
+		ignore_malformed_csv = true;
+	}
 	if (input.cmdOptionExists("-err_log")) {
 		error_log = true;
 	}
-	MCSRemoteImport* mcsimport = new MCSRemoteImport(argv[3], argv[1], argv[2], mappingFile, columnStoreXML, delimiter, inputDateFormat, default_non_mapped, escape_character, enclose_by_character, header, error_log);
+	MCSRemoteImport* mcsimport = new MCSRemoteImport(argv[3], argv[1], argv[2], mappingFile, columnStoreXML, delimiter, inputDateFormat, default_non_mapped, escape_character, enclose_by_character, header, error_log, nullOption, ignore_malformed_csv);
 	int32_t rtn = mcsimport->import();
 	return rtn;
 }

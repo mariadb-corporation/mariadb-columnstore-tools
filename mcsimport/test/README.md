@@ -86,7 +86,9 @@ Here a list of executed tests by the test suite and short explanation.
 | enclosesure test with default parameter | tests the injection with the default enclosing and escaping character (")                           | enclose_1          |
 | encl. test with special escape char.    | tests the injection with the default enclosing char (") and special escape char (/)                 | enclose_2          |
 | encl. test with special encl. char.     | tests the injection with a special enclosing char (+) and default escape char (")                   | enclose_3          |
-| encl. test with sp encl. and esc. char. | tests the injection with a special enclosing char (+) and special escape char (\\)                   | enclose_4          |
-| test with sp encl., esc. char. and deli | tests the injection with a special enclosing char (+), escape char (\\) and delimiter (\|)            | enclose_5          |
+| encl. test with sp encl. and esc. char. | tests the injection with a special enclosing char (+) and special escape char (\\)                  | enclose_4          |
+| test with sp encl., esc. char. and deli | tests the injection with a special enclosing char (+), escape char (\\) and delimiter (\|)          | enclose_5          |
 | tests if the header line is ignored     | tests if the header line is ignored when chosen by option                                           | header_1           |
-
+| tests of the null option -n 1           | tests if NULL strings are identified correctly as NULL values                                       | null_option_1      |
+| mcsimport fail without ig_malformed_csv | tests if mcsimport fails without the ignore_malformed_csv command line option                       | malformed_csv_1    |
+| mcsimport succeed with ig_malformed_csv | tests if mcsimport succeeds with the ignore_malformed_csv command line option                       | malformed_csv_2    |
