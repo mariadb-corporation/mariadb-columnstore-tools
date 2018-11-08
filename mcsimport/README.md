@@ -106,6 +106,9 @@ The default delimiter of the CSV input file is a comma `,` and can be changed th
 ### -df date_format
 By default mcsimport uses `YYYY-MM-DD HH:MM:SS` as input date format. An individual global date format can be specified via the command line parameter -df using the [strptime] format. Column specific input date formats can be defined in the mapping file and overwrite the global date format.
 
+### -n null_option
+By default mcsimport treats input strings with the value "NULL" as data. If the null_option is set to 1 strings with the value "NULL" are treated as NULL values.
+
 ### -default_non_mapped
 mcsimport needs to inject values for all columnstore columns. In order to use the columnstore column's default values for all non mapped target columns the global parameter `default_non_mapped` can be used. Target column specific default values in the mapping file overwrite the global default values of this parameter.
 
@@ -117,6 +120,12 @@ By default mcsimport uses the double-quote character `"` as escaping character. 
 
 ### -header
 Choose this flag to ignore the first line of the input CSV file as header. (It won't be injected)
+
+### -ignore_malformed_csv
+By default mcsimport rolls back the entire bulk import if a malformed csv entry is found. With this option mcsimport ignores detected malformed csv entries and continiues with the injection.
+
+### -err_log
+With this option an optional error log file is written which states truncated, saturated, and invalid values during the injection. If the command line parameter -ignore_malformed_csv is chosen, it also states which lines were ignored.
 
 [mcsapi]: https://github.com/mariadb-corporation/mariadb-columnstore-api
 [yaml-cpp]: https://github.com/jbeder/yaml-cpp

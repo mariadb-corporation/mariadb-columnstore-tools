@@ -156,6 +156,10 @@ def loadTestConfig(test_directory):
         testConfig["validation_coverage"] = None
     if not "header" in testConfig:
         testConfig["header"] = False
+    if not "null_option" in testConfig:
+        testConfig["null_option"] = None
+    if not "ignore_malformed_csv" in testConfig:
+        testConfig["ignore_malformed_csv"] = None
     if not "enclosing_character" in testConfig:
         testConfig["enclosing_character"] = None
     if not "escaping_character" in testConfig:
@@ -221,6 +225,11 @@ def executeMcsimport(test_directory,testConfig):
     if testConfig["escaping_character"] is not None:
         cmd.append("-C")
         cmd.append("%s" % (testConfig["escaping_character"]))
+    if testConfig["ignore_malformed_csv"]:
+        cmd.append("-ignore_malformed_csv")
+    if testConfig["null_option"] is not None:
+        cmd.append("-n")
+        cmd.append("%s" % (testConfig["null_option"]))
     
     print("Execute mcsimport: %s" % (cmd,))
     try:
