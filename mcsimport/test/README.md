@@ -92,3 +92,4 @@ Here a list of executed tests by the test suite and short explanation.
 | tests of the null option -n 1           | tests if NULL strings are identified correctly as NULL values                                       | null_option_1      |
 | mcsimport fail without ig_malformed_csv | tests if mcsimport fails without the ignore_malformed_csv command line option                       | malformed_csv_1    |
 | mcsimport succeed with ig_malformed_csv | tests if mcsimport succeeds with the ignore_malformed_csv command line option                       | malformed_csv_2    |
+| bool "true" value text injection        | tests if texts with the value "true" are transformed to 1 in numeric target columns                 | bool_transformation|
