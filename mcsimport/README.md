@@ -59,7 +59,7 @@ signtool.exe sign /tr http://timestamp.digicert.com /td sha256 /fd sha256 /a "Ma
 
 ## Usage
 ```shell
-mcsimport database table input_file [-m mapping_file] [-c Columnstore.xml] [-d delimiter] [-df date_format] [-default_non_mapped] [-E enclose_by_character] [-C escape_character] [-header]
+mcsimport database table input_file [-m mapping_file] [-c Columnstore.xml] [-d delimiter] [-n null_option] [-df date_format] [-default_non_mapped] [-E enclose_by_character] [-C escape_character] [-header] [-ignore_malformed_csv] [-err_log]
 ```
 
 ### -m mapping_file
