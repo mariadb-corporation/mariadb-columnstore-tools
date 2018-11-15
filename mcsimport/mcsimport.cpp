@@ -129,6 +129,12 @@ public:
 		std::ofstream errFile;
 		std::uint64_t ignored_malformed_csv_lines = 0;
 		try {
+			// generate a map of columnstore target column types
+			std::map<int32_t, mcsapi::columnstore_data_types_t> columnstore_column_types; // columnstore_column #, columnstore_column_data_type
+			for (int32_t c = 0; c < this->cs_table_columns; c++) {
+				columnstore_column_types[c] = tab.getColumn(c).getType();
+			}
+
 			std::ifstream csvFileStream(this->input_file);
 			std::vector<std::string> parsed_csv_fields;
 			// ignore the first line if it is the header
@@ -176,7 +182,7 @@ public:
 								bulk->setNull(col, &status);
 							}
 							// if an (custom) input date format is specified and the target column is of type DATE or DATETIME, transform the input to ColumnStoreDateTime and inject it
-							else if ((this->customInputDateFormat.find(col) != this->customInputDateFormat.end() || this->inputDateFormat != "") && (tab.getColumn(col).getType() == mcsapi::DATA_TYPE_DATE || tab.getColumn(col).getType() == mcsapi::DATA_TYPE_DATETIME)) {
+							else if ((this->customInputDateFormat.find(col) != this->customInputDateFormat.end() || this->inputDateFormat != "") && (columnstore_column_types[col] == mcsapi::DATA_TYPE_DATE || columnstore_column_types[col] == mcsapi::DATA_TYPE_DATETIME)) {
 								if (this->customInputDateFormat.find(col) != this->customInputDateFormat.end()) {
 									mcsapi::ColumnStoreDateTime dt = mcsapi::ColumnStoreDateTime((std::string) parsed_csv_fields[csvColumn], this->customInputDateFormat[col]);
 									bulk->setColumn(col, dt, &status);
@@ -185,6 +191,10 @@ public:
 									mcsapi::ColumnStoreDateTime dt = mcsapi::ColumnStoreDateTime((std::string) parsed_csv_fields[csvColumn], this->inputDateFormat);
 									bulk->setColumn(col, dt, &status);
 								}
+							}
+							// if value is true and target column is any NUMERIC type, transform true to 1 and inject it
+							else if (parsed_csv_fields[csvColumn] == "true" && (columnstore_column_types[col] == mcsapi::DATA_TYPE_BIGINT || columnstore_column_types[col] == mcsapi::DATA_TYPE_BIT || columnstore_column_types[col] == mcsapi::DATA_TYPE_DECIMAL || columnstore_column_types[col] == mcsapi::DATA_TYPE_DOUBLE || columnstore_column_types[col] == mcsapi::DATA_TYPE_FLOAT || columnstore_column_types[col] == mcsapi::DATA_TYPE_INT || columnstore_column_types[col] == mcsapi::DATA_TYPE_MEDINT || columnstore_column_types[col] == mcsapi::DATA_TYPE_SMALLINT || columnstore_column_types[col] == mcsapi::DATA_TYPE_TINYINT || columnstore_column_types[col] == mcsapi::DATA_TYPE_UBIGINT || columnstore_column_types[col] == mcsapi::DATA_TYPE_UDECIMAL || columnstore_column_types[col] == mcsapi::DATA_TYPE_UDOUBLE || columnstore_column_types[col] == mcsapi::DATA_TYPE_UFLOAT || columnstore_column_types[col] == mcsapi::DATA_TYPE_UINT || columnstore_column_types[col] == mcsapi::DATA_TYPE_UMEDINT || columnstore_column_types[col] == mcsapi::DATA_TYPE_USMALLINT || columnstore_column_types[col] == mcsapi::DATA_TYPE_UTINYINT)) {
+								bulk->setColumn(col, 1, &status);
 							}
 							else { // otherwise just inject the plain value as string
 								bulk->setColumn(col, (std::string) parsed_csv_fields[csvColumn], &status);
@@ -228,7 +238,7 @@ public:
 		std::cout << "Truncation count: " << sum.getTruncationCount() << std::endl;
 		std::cout << "Saturated count: " << sum.getSaturatedCount() << std::endl;
 		std::cout << "Invalid count: " << sum.getInvalidCount() << std::endl;
-		if (ignored_malformed_csv_lines) {
+		if (this->ignore_malformed_csv) {
 			std::cout << "Ignored malformed csv count: " << ignored_malformed_csv_lines << std::endl;
 		}
 
