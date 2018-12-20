@@ -24,6 +24,8 @@ NUMBER_CONCURRENT=5
 CONFIG_FILE=false
 LOG_FILE=$0.log
 
+SIZE_NEEDED_TEST=0
+
 exec 3>&1 1>>${LOG_FILE} 2>&1
 
 startTime=`date +%s`
@@ -70,6 +72,7 @@ printLog "[$USER] $0 $@"
 if [ -e columnstoreBackup.config ]; then
     source columnstoreBackup.config
 fi
+
 REcheck='^[0-9]+$'
 if ! [[ $NUMBER_BACKUPS =~ $REcheck ]] ; then
    printLog "ERROR: NUMBER_BACKUPS not a number" >&2
@@ -97,18 +100,16 @@ helpPrint () {
     echo "the backup system to have passwordless login enabled for the account that" 1>&3
     echo "MariaDB ColumnStore was installed and maintained. (Assumes root by default)" 1>&3
     echo "" 1>&3
-    echo "This tool must be run as root or with sudo." 1>&3
-    echo "" 1>&3
     echo "The default behavior is to run rsync locally to each UM and PM." 1>&3
     echo "PM data is stored in data directories labeled pm[moduleID]dbroot[DBrootID]" 1>&3
     echo "UM data is stored in directories labeled um[moduleID]" 1>&3
     echo "my.cnf data is stored in directory cnf" 1>&3
     echo "Columnstore.xml is stored in the top level of backupServerLocation" 1>&3
     echo "" 1>&3
-    echo "The -n option uses the rsync link-dest option to enable incremental backups." 1>&3
-    echo "These are stored in backup.1 thru backup.[n-1] from newest to oldest." 1>&3
-    echo "The impact on extra space needed is based on the amount data that changes." 1>&3
-    echo "with little to no data set changes the incremental backup size is small." 1>&3
+    echo "Checking for disk space on backup system requires running with -d (--dry-run)." 1>&3
+    echo "This will utilize rsync dry run to determine how much data will be copied" 1>&3
+    echo "and compare with disk space at the specified storage location." 1>&3
+    echo "Running without a prior dry-run is not necessary but will log a warning." 1>&3
     echo "" 1>&3
     echo "Usage: $0 [options] activeParentOAM backupServerLocation" 1>&3
     echo "" 1>&3
@@ -238,12 +239,6 @@ fi
 PM1=$1
 BACKUP_SERVER_LOCATION=$2
 
-## Check if root or sudo
-if [[ $EUID -ne 0 ]]; then
-   printLog "ERROR: This script must be run as root or with sudo" 
-   reportStatus 1
-fi
-
 ## Check rsync and xmllint are available
 if ! type rsync > /dev/null; then
     printLog "rsync is not installed. Please install and rerun." >&2
@@ -334,7 +329,11 @@ if [ "$dryRunFlag" = false ]; then
     fi
 else
     printLog "$command"
-    $command    
+    output=$($command)
+    thisCommandDataSize=$(echo $output | sed -n -e 's/.*Total transferred file size: \([0-9,]*\) .*$/\1/' -e 's/,*//pg')
+    totalDiskSpaceNeededOther=$(($totalDiskSpaceNeededOther + $thisCommandDataSize))
+    totalDiskSpaceNeeded=$(($totalDiskSpaceNeeded + $thisCommandDataSize))
+    #printLog "sizeNeeded = $totalDiskSpaceNeeded"    
 fi
 }
 
@@ -345,6 +344,7 @@ extraOptions=$3
 source=$4
 dest=$5
 
+getDiskSpaceCommands=""
 ## setup rsync option lists
 if [ "$dryRunFlag" = true ]; then
     extraOptions="-n --stats "$extraOptions
@@ -357,7 +357,14 @@ if [ "$dryRunFlag" = false ]; then
     { $command ; echo "$?" > "$resultsDir" ; } &
 else
     printLog "$command"
-    $command
+    output=$($command)
+    #How much data needs to be stored additionally
+    thisCommandDataSize=$(echo $output | sed -n -e 's/.*Total transferred file size: \([0-9,]*\) .*$/\1/' -e 's/,*//pg')
+    #How much total data should be in the PM directories on backup. (calculate remaining tranfer time)
+    thisCommandPMDataSize=$(echo $output | sed -n -e 's/.*Total file size: \([0-9,]*\) .*$/\1/' -e 's/,*//pg')
+    totalDiskSpaceNeededPM=$(($totalDiskSpaceNeededPM + $thisCommandPMDataSize))
+    totalDiskSpaceNeeded=$(($totalDiskSpaceNeeded + $thisCommandDataSize))
+    #printLog "sizeNeeded = $totalDiskSpaceNeeded"
 fi
 }
 
@@ -484,53 +491,75 @@ fi
 }
 
 measureDiskSpace () {
-    for (( moduleID=1; moduleID<=$pmModuleCount; moduleID++ ))
-    do
-        for (( moduleDBRootID=1; moduleDBRootID<=${pmModuleDBRootCount[$moduleID]}; moduleDBRootID++ ))
-        do
-            thisDBrootID=$(xmllint --xpath "string(//ModuleDBRootID$moduleID-$moduleDBRootID-3)" $BACKUP_SERVER_LOCATION/Columnstore.xml)
-            command="ssh $REMOTE_USER@${pmModuleIP[$moduleID]} du -s -b ${DBRoot[$thisDBrootID]}"
-            verbosePrint "$command"
-            commandReturn=$($command)
-            returnValues=($commandReturn)
-            if [ ${returnValues[1]} == ${DBRoot[$thisDBrootID]} ]; then
-                totalDiskSpaceNeeded=$(( $totalDiskSpaceNeeded + ${returnValues[0]} ))
-                totalDiskSpaceNeededPM=$(( $totalDiskSpaceNeededPM + ${returnValues[0]} ))                
-            else
-                printLog "failed return from command: $command" >&2
+    totalDiskSpaceAvailable=$(df -B1 $BACKUP_SERVER_LOCATION | awk 'NR==2 {print $4}')
+    if [ -e backupDiskSpace.dat ]; then
+        if [ "$DRY_RUN" = false ]; then
+            source backupDiskSpace.dat
+            if (( $totalDiskSpaceAvailable < $totalDiskSpaceNeeded )); then
+                printLog "ERROR: Not enough space on backup system" >&2
+                printLog "(Needs = $totalDiskSpaceNeeded)" >&2
+                printLog "(Avail = $totalDiskSpaceAvailable)" >&2
                 reportStatus 3
             fi
-            if [ $PMwithUM == "y" ]; then
-                command="ssh $REMOTE_USER@${pmModuleIP[$moduleID]} du -s -b $INSTALL_DIR/mysql/db"
+        else
+            rm -f backupDiskSpace.dat
+        fi
+    else
+        if [ "$DRY_RUN" = false ]; then  
+            printLog "WARNING: Disk Space NOT verified for backup system." >&2
+            printLog "         Run with -d option to collect disk space requirement information via rsync." >&2
+        fi
+        # Do all this if we didn't run a dry-run so that the progress bar works.
+        # Don't block because this data size doesn't account for incremental storage of previous runs
+        for (( moduleID=1; moduleID<=$pmModuleCount; moduleID++ ))
+        do
+            for (( moduleDBRootID=1; moduleDBRootID<=${pmModuleDBRootCount[$moduleID]}; moduleDBRootID++ ))
+            do
+                thisDBrootID=$(xmllint --xpath "string(//ModuleDBRootID$moduleID-$moduleDBRootID-3)" $BACKUP_SERVER_LOCATION/Columnstore.xml)
+                command="ssh $REMOTE_USER@${pmModuleIP[$moduleID]} du -s -b ${DBRoot[$thisDBrootID]}"
                 verbosePrint "$command"
                 commandReturn=$($command)
                 returnValues=($commandReturn)
-                if [ ${returnValues[1]} == $INSTALL_DIR/mysql/db ]; then
-                    totalDiskSpaceNeeded=$(( $totalDiskSpaceNeeded + ${returnValues[0]} ))
+                if [ ${returnValues[1]} == ${DBRoot[$thisDBrootID]} ]; then
+#                    totalDiskSpaceNeeded=$(( $totalDiskSpaceNeeded + ${returnValues[0]} ))
                     totalDiskSpaceNeededPM=$(( $totalDiskSpaceNeededPM + ${returnValues[0]} ))                
                 else
                     printLog "failed return from command: $command" >&2
                     reportStatus 3
-                fi                
-            fi
-        done        
-    done
-    for (( moduleID=1; moduleID<=$umModuleCount; moduleID++ ))
-    do
-        command="ssh $REMOTE_USER@${umModuleIP[$moduleID]} du -s -b $INSTALL_DIR/mysql/db"
-        commandReturn=$($command)
-        returnValues=($commandReturn)
-        if [ ${returnValues[1]} == $INSTALL_DIR/mysql/db ]; then
-            totalDiskSpaceNeeded=$(( $totalDiskSpaceNeeded + ${returnValues[0]} ))
-            totalDiskSpaceNeededUM=${returnValues[0]}               
-        else
-            printLog "failed return from command: $command" >&2
-            reportStatus 3
-        fi
-    done
-    totalDiskSpaceAvailable=$(df -B1 $BACKUP_SERVER_LOCATION | awk 'NR==2 {print $4}')
+                fi
+                if [ $PMwithUM == "y" ]; then
+                    command="ssh $REMOTE_USER@${pmModuleIP[$moduleID]} du -s -b $INSTALL_DIR/mysql/db"
+                    verbosePrint "$command"
+                    commandReturn=$($command)
+                    returnValues=($commandReturn)
+                    if [ ${returnValues[1]} == $INSTALL_DIR/mysql/db ]; then
+#                        totalDiskSpaceNeeded=$(( $totalDiskSpaceNeeded + ${returnValues[0]} ))
+                        totalDiskSpaceNeededPM=$(( $totalDiskSpaceNeededPM + ${returnValues[0]} ))                
+                    else
+                        printLog "failed return from command: $command" >&2
+                        reportStatus 3
+                    fi                
+                fi
+            done        
+        done
+    fi
 }
 
+editDiskSpaceFile () {
+    if [ "$DRY_RUN" = true ]; then
+        echo "totalDiskSpaceNeededPM=$totalDiskSpaceNeededPM" >> backupDiskSpace.dat
+        echo "totalDiskSpaceNeededOther=$totalDiskSpaceNeededOther" >> backupDiskSpace.dat
+        echo "totalDiskSpaceNeeded=$totalDiskSpaceNeeded" >> backupDiskSpace.dat
+        if (( $totalDiskSpaceAvailable < $totalDiskSpaceNeeded )); then
+            printLog "ERROR: Not enough space on backup system" >&2
+            printLog "(Needs = $totalDiskSpaceNeeded)" >&2
+            printLog "(Avail = $totalDiskSpaceAvailable)" >&2
+            reportStatus 3
+        fi
+    else
+        rm -f backupDiskSpace.dat
+    fi
+}
 ###############################################################################
 # monitorProgress
 ###############################################################################
@@ -697,7 +726,7 @@ printLog "DONE"
 # Backup UM
 ###############################################################################
 backupUM () {
-printLog "Backing up UM"
+printLog "Backing up UMs"
 ## dir=$(mktemp -d)
 ## loop the pmModules
 for (( moduleID=1; moduleID<=$umModuleCount; moduleID++ ))
@@ -806,22 +835,8 @@ do
     verbosePrint "DBRoot$dbRootID: ${DBRoot[$dbRootID]}"
 done
 
-## Check if xmllint is available for use
-
-
 ## Measure disk space usage and compare to available
 measureDiskSpace
-
-#verbosePrint "totalDiskSpaceNeededPM:    $totalDiskSpaceNeededPM"
-#verbosePrint "totalDiskSpaceNeededUM:    $totalDiskSpaceNeededUM"
-#verbosePrint "totalDiskSpaceAvailable:   $totalDiskSpaceAvailable"
-
-if (( $totalDiskSpaceAvailable < $totalDiskSpaceNeeded )); then
-    printLog "ERROR: Not enough space on backup system" >&2
-    printLog "(Needs = $totalDiskSpaceNeeded)" >&2
-    printLog "(Avail = $totalDiskSpaceAvailable)" >&2
-    reportStatus 3
-fi
 
 ## suspend db writes
 suspendDBWrites
@@ -834,6 +849,8 @@ backupUM
 
 ## resume db writes
 resumeDBWrites
+
+editDiskSpaceFile
 
 reportStatus 0
 }
