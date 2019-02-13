@@ -51,7 +51,7 @@ Afterwards set the environment variable `YAML_CPP_INSTALL_DIR` to the cloned yam
 ```shell
 git clone https://github.com/mariadb-corporation/mariadb-columnstore-tools
 mkdir build && cd build
-cmake ../mariadb-columnstore-data-adapters -DBACKUPRESTORE=OFF -DMONITORING=OFF -DREMOTE_CPIMPORT=ON -G "Visual Studio 14 2015 Win64" -DTEST_RUNNER=ON
+cmake ../mariadb-columnstore-tools -DBACKUPRESTORE=OFF -DMONITORING=OFF -DREMOTE_CPIMPORT=ON -G "Visual Studio 14 2015 Win64" -DTEST_RUNNER=ON
 cmake --build . --config RelWithDebInfo --target package
 ctest -C RelWithDebInfo -V
 signtool.exe sign /tr http://timestamp.digicert.com /td sha256 /fd sha256 /a "MariaDB ColumnStore mcsimport-*-x64.msi"
