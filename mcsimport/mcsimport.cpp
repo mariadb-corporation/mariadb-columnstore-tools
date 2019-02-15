@@ -314,7 +314,8 @@ private:
     * Reads the input file and buffers it in file_input_buffer.
     */
     void readDataFromFileIntoBuffer() {
-        std::ifstream input_file(input_file);
+        std::ifstream input_file;
+        input_file.open(this->input_file);
         char c;
         while (input_file.get(c) && !error) {
             file_input_buffer->push(c);
