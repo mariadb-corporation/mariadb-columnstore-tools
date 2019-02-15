@@ -59,7 +59,7 @@ signtool.exe sign /tr http://timestamp.digicert.com /td sha256 /fd sha256 /a "Ma
 
 ## Usage
 ```shell
-mcsimport database table input_file [-m mapping_file] [-c Columnstore.xml] [-d delimiter] [-n null_option] [-df date_format] [-default_non_mapped] [-E enclose_by_character] [-C escape_character] [-header] [-ignore_malformed_csv] [-err_log]
+mcsimport database table input_file [-m mapping_file] [-c Columnstore.xml] [-d delimiter] [-df date_format] [-n null_option] [-default_non_mapped] [-E enclose_by_character] [-C escape_character] [-fib file_input_buffer] [-fibwt file_input_buffer_wait_time] [-clb csv_line_buffer] [-clbwt csv_line_buffer_wait_time] [-header] [-ignore_malformed_csv] [-err_log]
 ```
 
 ### -m mapping_file
@@ -117,6 +117,18 @@ By default mcsimport uses the double-quote character `"` as enclosing character.
 
 ### -C escape_character
 By default mcsimport uses the double-quote character `"` as escaping character. It can be changed through the command line parameter -C. The escaping character's length is limited to 1.
+
+### -fib file_input_buffer
+By default mcsimport uses a file input buffer of 209,715,200 Byte (200 MiB) to cache the input file in RAM. It can be changed through the command line parameter -fib. A minimum file input buffer of 33,554,432 (32 MiB) is required.
+
+### -fibwt file_input_buffer_wait_time
+By default mcsimport uses a file input buffer wait time of 100 ms. A thread waits this time if the file input buffer is full / empty to give another thread time to fill / empty the buffer. It can be changed through the command line parameter -fibwt. A minimum file input buffer wait time of 10 ms is required.
+
+### -clb csv_line_buffer
+By default mcsimport uses a csv line buffer of 1,500,000 to cache parsed csv lines in RAM. It can be changed through the command line parameter -clb. A minimum csv line buffer of 150,000 is required.
+
+### -clbwt csv_line_buffer_wait_time
+By default mcsimport uses a csv line buffer wait time of 100 ms. A thread waits this time if the csv line buffer is full / empty to give another thread time to fill / empty the buffer. It can be changed through the command line parameter -clbwt. A minimum csv line buffer wait time of 10 ms is required.
 
 ### -header
 Choose this flag to ignore the first line of the input CSV file as header. (It won't be injected)

@@ -25,6 +25,9 @@
 #include <mutex>
 #include <condition_variable>
 
+/**
+* Helper class to parse the input cmd parameter.
+*/
 class InputParser {
 public:
     InputParser(int &argc, char **argv) {
@@ -48,32 +51,49 @@ private:
     std::vector <std::string> tokens;
 };
 
+/**
+* Thread safe FiFo queue for one consumer and one producer utilising a ring buffer.
+*/
 template <typename T>
 class SharedDataStorage {
 public:
-    SharedDataStorage(uint32_t bufferSize) {
+    /**
+    * Initializes the SharedDataStorage and sets its buffer size and the wait time before the processing is continued if the buffer is full / empty.
+    */
+    SharedDataStorage(uint32_t bufferSize, uint32_t waitTime) {
         this->bufferSize = bufferSize;
+        this->pushWaitTime = waitTime;
+        this->popWaitTime = waitTime / 2;
         data = new T[bufferSize];
     }
 
+    /**
+    * Pushes an element into the FiFo queue.
+    */
     void push(T& t) {
         if ((write_pointer + 1) % bufferSize == read_pointer) {
             // the array is full
-            std::this_thread::sleep_for(std::chrono::milliseconds(100));
-            push(t);
+            std::unique_lock<std::mutex> guard(m_data);
+            c_data.wait(guard, [this] {return (write_pointer + 1) % bufferSize != read_pointer; });
+            guard.unlock();
+            std::this_thread::sleep_for(std::chrono::milliseconds(pushWaitTime)); //give it some time to empty before continue
         }
-        else {
-            data[write_pointer] = t;
-            write_pointer = ++write_pointer % bufferSize;
-        }
+        data[write_pointer] = t;
+        write_pointer = ++write_pointer % bufferSize;
+        c_data.notify_one();
     }
 
+    /**
+    * Pops the latest element out of the FiFo queue.
+    * @returns true if there are more elements to process in the queue.
+    */
     bool pop(T& t) {
         if (finished) {
             if (read_pointer != write_pointer) {
                 // the array is still filled and no more data is expected
                 t = data[read_pointer];
                 read_pointer = ++read_pointer % bufferSize;
+                c_data.notify_one();
                 return true;
             }
             else {
@@ -82,36 +102,55 @@ public:
             }
         }
         else {
-            if (read_pointer != write_pointer) {
+            if (read_pointer == write_pointer) {
+                // the array is empty but more data is expected
+                std::unique_lock<std::mutex> guard(m_data);
+                c_data.wait(guard, [this] {return (read_pointer != write_pointer) || finished; });
+                guard.unlock();
+                std::this_thread::sleep_for(std::chrono::milliseconds(popWaitTime)); // give it some time to fill before continue
+                return pop(t);
+            }
+            else {
                 // the array is filled and more date is expected
                 t = data[read_pointer];
                 read_pointer = ++read_pointer % bufferSize;
+                c_data.notify_one();
                 return true;
-            }
-            else {
-                // the array is empty but more data is expected
-                std::this_thread::sleep_for(std::chrono::milliseconds(100));
-                return pop(t);
             }
         }
     }
 
+    /**
+    * Sets an internal flag to indicate that no more data is injected from the producer.
+    */
     void finishedWriting() {
         finished = true;
+        c_data.notify_one();
     }
 
 private:
     T* data;
+    std::mutex m_data;
+    std::condition_variable c_data;
     bool finished = false;
     uint32_t bufferSize;
+    uint32_t popWaitTime;
+    uint32_t pushWaitTime;
     uint32_t write_pointer = 0;
     uint32_t read_pointer = 0;
 };
 
-
+/**
+* CSV remote import class. Injects a CSV file into MariaDB ColumnStore.
+* Internally it ueses a pipeline of three threads and two FiFo queues for the processing. 
+* One thread for reading the csv file, one thread for parsing it into fields, and one thread for writing the parsed fields to ColumnStore.
+*/
 class MCSRemoteImport {
 public:
-    MCSRemoteImport(std::string input_file, std::string database, std::string table, std::string mapping_file, std::string columnStoreXML, char delimiter, std::string inputDateFormat, bool default_non_mapped, char escape_character, char enclose_by_character, bool header, bool error_log, std::int32_t nullOption, bool ignore_malformed_csv, uint32_t file_input_buffer_size, uint32_t csv_fields_buffer_size) {
+    /**
+    * Instantiates a new remote import object, and checks if the given parameter are ok.
+    */
+    MCSRemoteImport(std::string input_file, std::string database, std::string table, std::string mapping_file, std::string columnStoreXML, char delimiter, std::string inputDateFormat, bool default_non_mapped, char escape_character, char enclose_by_character, bool header, bool error_log, std::int32_t nullOption, bool ignore_malformed_csv, uint32_t file_input_buffer_size, uint32_t file_input_buffer_wait_time, uint32_t csv_fields_buffer_size, uint32_t csv_fields_buffer_wait_time) {
         // check if we can connect to the ColumnStore database and extract the number of columns of the target table
         try {
             if (columnStoreXML == "") {
@@ -210,14 +249,20 @@ public:
             generateExplicitMapping(this->number_of_csv_columns, default_non_mapped, mapping_file);
         }
 
-        this->file_input_buffer = new SharedDataStorage<char>(file_input_buffer_size);
-        this->csv_fields_buffer = new SharedDataStorage <std::vector<std::string>>(csv_fields_buffer_size);
+        this->file_input_buffer = new SharedDataStorage<char>(file_input_buffer_size, file_input_buffer_wait_time);
+        this->csv_fields_buffer = new SharedDataStorage <std::vector<std::string>>(csv_fields_buffer_size, csv_fields_buffer_wait_time);
     }
 
+    /**
+    * Destructor, cleans allocated memory on exit.
+    */
     ~MCSRemoteImport() {
         clean();
     }
 
+    /**
+    * Starts the import process.
+    */
     int32_t import() {
         std::thread t1(&MCSRemoteImport::readDataFromFileIntoBuffer, this);
         std::thread t2(&MCSRemoteImport::parseDataFromBuffer, this);
@@ -372,6 +417,15 @@ private:
 
     ///FUNCTIONS///
 
+    /**
+    * Helper function, that helps to process a character into a csv field.
+    *
+    * Returns:
+    * - OLD_FIELD if the character belogs to the old field and was added to it.
+    * - NEW_FIELD if the character indicates that a new field begun.
+    * - NEW_LINE if the character indicates that a new csv line begun.
+    * - RE_PROCESS_CHARACTER if the character needs to be processed again.
+    */
     int32_t processChracterToCsvField(char& c, std::string& csv_field, bool& withinEnclosed, bool& lastCharWasEscapeChar) {
         if (withinEnclosed) {
             if (lastCharWasEscapeChar) {
@@ -436,6 +490,10 @@ private:
         return OLD_FIELD;
     }
 
+    /**
+    * Helper function, that verifies a parsed csv line against the number of expected csv fields inferred from the first line of the csv file.
+    * Once a csv line is verified it is added to the csv_fields_buffer.
+    */
     void verifyAndAddParsedCsvLine(std::vector<std::string>& csv_fields) {
         if (csv_fields.size() != number_of_csv_columns && !ignore_malformed_csv) {
             std::string errorMsg = "csv input parse error: the csv input file's columns of: " + std::to_string(csv_fields.size()) + " doesn't match the expected column count of the first line of: " + std::to_string(number_of_csv_columns) + "\nvalues: ";
@@ -469,6 +527,9 @@ private:
         }
     }
 
+    /**
+    * Writes parsed csv fields to the specified ColumnStore table.
+    */
     void writeCsvFieldsToColumnStoreTable(std::vector<std::string>& csv_fields) {
         mcsapi::columnstore_data_convert_status_t status;
         for (uint32_t col = 0; col < number_of_cs_table_columns; col++) {
@@ -534,7 +595,7 @@ private:
     }
 
     /**
-    * Generates an implicit 1:1 mapping of csv columns to cs columns
+    * Generates an implicit 1:1 mapping of csv columns to cs columns.
     */
     void generateImplicitMapping(uint32_t csv_first_row_number_of_columns, bool default_non_mapped) {
         // check the column sizes of csv input and columnstore target for compatibility
@@ -566,7 +627,7 @@ private:
     }
 
     /**
-    * Generates an explicit mapping of cs to csv columns using the mapping file
+    * Generates an explicit mapping of cs to csv columns using the mapping file.
     */
     void generateExplicitMapping(int32_t csv_first_row_number_of_columns, bool default_non_mapped, std::string mapping_file) {
 
@@ -685,6 +746,9 @@ private:
         }
     }
 
+    /**
+    * Helper function to handle optional column parameter like the custom input date format.
+    */
     void handleOptionalColumnParameter(int32_t source, int32_t target, YAML::Node column) {
         // if there is already an old custom input date format entry delete it
         if (this->customInputDateFormat.find(target) != this->customInputDateFormat.end()) {
@@ -702,8 +766,8 @@ private:
         }
     }
 
-    /*
-    * returns the target id of given string's columnstore representation if it can be found. otherwise -1.
+    /**
+    * Returns the target id of given string's columnstore representation if it can be found. otherwise -1.
     */
     int32_t getTargetId(std::string target) {
         try {
@@ -736,6 +800,9 @@ private:
         return parsed_raw_csv_field_string;
     }
 
+    /**
+    * Cleans the allocated memory.
+    */
     void clean() {
         if (csv_fields_buffer != nullptr) {
             delete(csv_fields_buffer);
@@ -752,12 +819,15 @@ private:
     }
 };
 
-
+/**
+* Main function interacted with from command line.
+* Responsible for parsing command line parameter, and starting the import process.
+*/
 int main(int argc, char* argv[])
 {
     // Check if the command line arguments are valid
     if (argc < 4) {
-        std::cerr << "Usage: " << argv[0] << " database table input_file [-m mapping_file] [-c Columnstore.xml] [-d delimiter] [-df date_format] [-n null_option] [-default_non_mapped] [-E enclose_by_character] [-C escape_character] [-fib file_input_buffer] [-clb csv_line_buffer] [-header] [-ignore_malformed_csv] [-err_log]" << std::endl;
+        std::cerr << "Usage: " << argv[0] << " database table input_file [-m mapping_file] [-c Columnstore.xml] [-d delimiter] [-df date_format] [-n null_option] [-default_non_mapped] [-E enclose_by_character] [-C escape_character] [-fib file_input_buffer] [-fibwt file_input_buffer_wait_time] [-clb csv_line_buffer] [-clbwt csv_line_buffer_wait_time] [-header] [-ignore_malformed_csv] [-err_log]" << std::endl;
         return 1;
     }
 
@@ -768,7 +838,9 @@ int main(int argc, char* argv[])
     std::string inputDateFormat;
     std::int32_t nullOption = 0;
     std::uint32_t file_input_buffer_size = 1024 * 1024 * 200;
+    std::uint32_t file_input_buffer_wait_time = 100;
     std::uint32_t csv_fields_buffer_size = 1500000;
+    std::uint32_t csv_fields_buffer_wait_time = 100;
     bool default_non_mapped = false;
     bool ignore_malformed_csv = false;
     bool header = false;
@@ -838,13 +910,27 @@ int main(int argc, char* argv[])
     if (input.cmdOptionExists("-fib")) {
         try {
             file_input_buffer_size = std::stoi(input.getCmdOption("-fib"));
-            if (file_input_buffer_size < 33554431) {
+            if (file_input_buffer_size < 33554432) {
                 std::cerr << "Error: The given file input buffer parameter is out of range. A value higher than 33554431 needs to be inserted." << std::endl;
                 return 2;
             }
         }
         catch (std::exception&) {
-            std::cerr << "Error: Couldn't parse file input buffer parameter to an unsigned integer" << std::endl;
+            std::cerr << "Error: Couldn't parse the file input buffer parameter to an unsigned integer" << std::endl;
+            return 2;
+        }
+    }
+
+    if (input.cmdOptionExists("-fibwt")) {
+        try {
+            file_input_buffer_wait_time = std::stoi(input.getCmdOption("-fibwt"));
+            if (file_input_buffer_wait_time < 10) {
+                std::cerr << "Error: The given file input buffer wait time parameter is out of range. A value higher than 9 ms needs to be inserted." << std::endl;
+                return 2;
+            }
+        }
+        catch (std::exception&) {
+            std::cerr << "Error: Couldn't parse the file input buffer wait time parameter to an unsigned integer" << std::endl;
             return 2;
         }
     }
@@ -852,18 +938,32 @@ int main(int argc, char* argv[])
     if (input.cmdOptionExists("-clb")) {
         try {
             csv_fields_buffer_size = std::stoi(input.getCmdOption("-clb"));
-            if (csv_fields_buffer_size < 149999) {
+            if (csv_fields_buffer_size < 150000) {
                 std::cerr << "Error: The given csv line buffer parameter is out of range. A value higher than 149999 needs to be inserted." << std::endl;
                 return 2;
             }
         }
         catch (std::exception&) {
-            std::cerr << "Error: Couldn't parse csv line buffer parameter to an unsigned integer" << std::endl;
+            std::cerr << "Error: Couldn't parse the csv line buffer parameter to an unsigned integer" << std::endl;
             return 2;
         }
     }
 
-    MCSRemoteImport* mcsimport = new MCSRemoteImport(argv[3], argv[1], argv[2], mappingFile, columnStoreXML, delimiter, inputDateFormat, default_non_mapped, escape_character, enclose_by_character, header, error_log, nullOption, ignore_malformed_csv, file_input_buffer_size, csv_fields_buffer_size);
+    if (input.cmdOptionExists("-clbwt")) {
+        try {
+            file_input_buffer_wait_time = std::stoi(input.getCmdOption("-clbwt"));
+            if (file_input_buffer_wait_time < 10) {
+                std::cerr << "Error: The given csv line buffer wait time parameter is out of range. A value higher than 9 ms needs to be inserted." << std::endl;
+                return 2;
+            }
+        }
+        catch (std::exception&) {
+            std::cerr << "Error: Couldn't parse the csv line buffer wait time parameter to an unsigned integer" << std::endl;
+            return 2;
+        }
+    }
+
+    MCSRemoteImport* mcsimport = new MCSRemoteImport(argv[3], argv[1], argv[2], mappingFile, columnStoreXML, delimiter, inputDateFormat, default_non_mapped, escape_character, enclose_by_character, header, error_log, nullOption, ignore_malformed_csv, file_input_buffer_size, file_input_buffer_wait_time, csv_fields_buffer_size, csv_fields_buffer_wait_time);
     int32_t rtn = mcsimport->import();
     return rtn;
 }
