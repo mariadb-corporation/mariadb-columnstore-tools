@@ -128,6 +128,13 @@ public:
         c_data.notify_one();
     }
 
+    /**
+    * Empties the shared data storage on deconstruction.
+    */
+    ~SharedDataStorage() {
+        delete[] data;
+    }
+
 private:
     T* data;
     std::mutex m_data;
@@ -196,14 +203,21 @@ public:
             clean();
             std::exit(2);
         }
-        std::ifstream csvFileStream(input_file);
+        // if the csv file is smaller than the input file buffer, use the csv file size as input file buffer
+        csvFile.seekg(0, std::ios::end);
+        this->input_file_size = csvFile.tellg();
+        if (file_input_buffer_size > input_file_size) {
+            file_input_buffer_size = input_file_size;
+        }
+        csvFile.seekg(0, std::ios::beg);
+        // extract the csv header fields (if any) and number of csv columns from the first line
         std::vector<std::string> csv_header_fields;
         std::string csv_field;
         char c;
         int32_t status = OLD_FIELD;
         bool withinEnclosed = false;
         bool lastCharWasEscapechar = false;
-        while (csvFileStream.get(c) && status != NEW_LINE) {
+        while (csvFile.get(c) && status != NEW_LINE) {
             reprocess:
             status = processChracterToCsvField(c, csv_field, withinEnclosed, lastCharWasEscapechar);
             switch (status) {
@@ -220,8 +234,8 @@ public:
                 goto reprocess;
             }
         }
-        if (!csvFileStream.eof()) {
-            csvFileStream.close();
+        if (csvFile.is_open()) {
+            csvFile.close();
         }
         this->number_of_csv_columns = csv_header_fields.size();
         this->input_file = input_file;
@@ -298,6 +312,7 @@ private:
     uint32_t number_of_cs_table_columns = 0;
     uint32_t number_of_csv_columns = 0;
     uint32_t ignored_malformed_csv_lines = 0;
+    uint64_t input_file_size = 0;
     std::string input_file;
     std::ofstream errFileStream;
     std::mutex m_errorFileStream;
@@ -316,11 +331,22 @@ private:
     void readDataFromFileIntoBuffer() {
         std::ifstream input_file;
         input_file.open(this->input_file);
-        char c;
-        while (input_file.get(c) && !error) {
-            file_input_buffer->push(c);
+        char* read_buffer = new char[1024];
+        input_file.read(read_buffer, 1024);
+        while (input_file.good() && !error) {
+            for (int i = 0; i < 1024; i++) {
+                file_input_buffer->push(read_buffer[i]);
+            }
+            input_file.read(read_buffer, 1024);
+        }
+        for (int i = 0; i < input_file_size % 1024; i++) {
+            file_input_buffer->push(read_buffer[i]);
         }
         file_input_buffer->finishedWriting();
+        if (input_file.is_open()) {
+            input_file.close();
+        }
+        delete[] read_buffer;
         std::cout << "file read thread done" << std::endl;
     }
 
@@ -805,6 +831,9 @@ private:
     * Cleans the allocated memory.
     */
     void clean() {
+        if (errFileStream.is_open()) {
+            errFileStream.close();
+        }
         if (csv_fields_buffer != nullptr) {
             delete(csv_fields_buffer);
         }
