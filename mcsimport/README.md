@@ -59,7 +59,7 @@ signtool.exe sign /tr http://timestamp.digicert.com /td sha256 /fd sha256 /a "Ma
 
 ## Usage
 ```shell
-mcsimport database table input_file [-m mapping_file] [-c Columnstore.xml] [-d delimiter] [-df date_format] [-n null_option] [-default_non_mapped] [-E enclose_by_character] [-C escape_character] [-fib file_input_buffer] [-fibwt file_input_buffer_wait_time] [-clb csv_line_buffer] [-clbwt csv_line_buffer_wait_time] [-header] [-ignore_malformed_csv] [-err_log]
+mcsimport database table input_file [-m mapping_file] [-c Columnstore.xml] [-d delimiter] [-df date_format] [-n null_option] [-default_non_mapped] [-E enclose_by_character] [-C escape_character] [-rc read_cache_size] [-fib file_input_buffer] [-fibwt file_input_buffer_wait_time] [-clb csv_line_buffer] [-clbwt csv_line_buffer_wait_time] [-header] [-ignore_malformed_csv] [-err_log]
 ```
 
 ### -m mapping_file
@@ -117,6 +117,9 @@ By default mcsimport uses the double-quote character `"` as enclosing character.
 
 ### -C escape_character
 By default mcsimport uses the double-quote character `"` as escaping character. It can be changed through the command line parameter -C. The escaping character's length is limited to 1.
+
+### -rc read_cache_size
+By default mcsimport uses a read cache size of 1% of the file input buffer (2MiB) to cache chunks of the input file in RAM. It can be changed through the command line paramter -rc. A minimum cache size of 1,048,576 (1 MiB) is required.
 
 ### -fib file_input_buffer
 By default mcsimport uses a file input buffer of 209,715,200 Byte (200 MiB) to cache the input file in RAM. It can be changed through the command line parameter -fib. A minimum file input buffer of 33,554,432 (32 MiB) is required.

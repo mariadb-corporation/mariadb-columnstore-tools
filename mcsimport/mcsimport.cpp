@@ -157,7 +157,7 @@ public:
     /**
     * Instantiates a new remote import object, and checks if the given parameter are ok.
     */
-    MCSRemoteImport(std::string input_file, std::string database, std::string table, std::string mapping_file, std::string columnStoreXML, char delimiter, std::string inputDateFormat, bool default_non_mapped, char escape_character, char enclose_by_character, bool header, bool error_log, std::int32_t nullOption, bool ignore_malformed_csv, uint32_t file_input_buffer_size, uint32_t file_input_buffer_wait_time, uint32_t csv_fields_buffer_size, uint32_t csv_fields_buffer_wait_time) {
+    MCSRemoteImport(std::string input_file, std::string database, std::string table, std::string mapping_file, std::string columnStoreXML, char delimiter, std::string inputDateFormat, bool default_non_mapped, char escape_character, char enclose_by_character, bool header, bool error_log, std::int32_t nullOption, bool ignore_malformed_csv, uint32_t file_input_buffer_size, uint32_t file_input_buffer_wait_time, uint32_t csv_fields_buffer_size, uint32_t csv_fields_buffer_wait_time, uint32_t read_cache_size) {
         // check if we can connect to the ColumnStore database and extract the number of columns of the target table
         try {
             if (columnStoreXML == "") {
@@ -195,6 +195,7 @@ public:
         this->enclose_by_character = enclose_by_character;
         this->nullOption = nullOption;
         this->ignore_malformed_csv = ignore_malformed_csv;
+        this->read_cache_size = read_cache_size;
 
         // check if the source csv file exists and extract the number of columns of its first row
         std::ifstream csvFile(input_file);
@@ -203,11 +204,14 @@ public:
             clean();
             std::exit(2);
         }
-        // if the csv file is smaller than the input file buffer, use the csv file size as input file buffer
+        // if the csv file is smaller than the input file buffer, use the csv file size as input file buffer size and read_cache_size
         csvFile.seekg(0, std::ios::end);
         this->input_file_size = csvFile.tellg();
         if (file_input_buffer_size > input_file_size) {
             file_input_buffer_size = input_file_size;
+        }
+        if (this->read_cache_size > input_file_size) {
+            this->read_cache_size = input_file_size;
         }
         csvFile.seekg(0, std::ios::beg);
         // extract the csv header fields (if any) and number of csv columns from the first line
@@ -312,6 +316,7 @@ private:
     uint32_t number_of_cs_table_columns = 0;
     uint32_t number_of_csv_columns = 0;
     uint32_t ignored_malformed_csv_lines = 0;
+    uint32_t read_cache_size = 1024 * 1024;
     uint64_t input_file_size = 0;
     std::string input_file;
     std::ofstream errFileStream;
@@ -331,15 +336,15 @@ private:
     void readDataFromFileIntoBuffer() {
         std::ifstream input_file;
         input_file.open(this->input_file);
-        char* read_buffer = new char[1024];
-        input_file.read(read_buffer, 1024);
+        char* read_buffer = new char[read_cache_size];
+        input_file.read(read_buffer, read_cache_size);
         while (input_file.good() && !error) {
-            for (int i = 0; i < 1024; i++) {
+            for (uint32_t i = 0; i < read_cache_size; i++) {
                 file_input_buffer->push(read_buffer[i]);
             }
-            input_file.read(read_buffer, 1024);
+            input_file.read(read_buffer, read_cache_size);
         }
-        for (int i = 0; i < input_file_size % 1024; i++) {
+        for (uint32_t i = 0; i < input_file_size % read_cache_size; i++) {
             file_input_buffer->push(read_buffer[i]);
         }
         file_input_buffer->finishedWriting();
@@ -857,7 +862,7 @@ int main(int argc, char* argv[])
 {
     // Check if the command line arguments are valid
     if (argc < 4) {
-        std::cerr << "Usage: " << argv[0] << " database table input_file [-m mapping_file] [-c Columnstore.xml] [-d delimiter] [-df date_format] [-n null_option] [-default_non_mapped] [-E enclose_by_character] [-C escape_character] [-fib file_input_buffer] [-fibwt file_input_buffer_wait_time] [-clb csv_line_buffer] [-clbwt csv_line_buffer_wait_time] [-header] [-ignore_malformed_csv] [-err_log]" << std::endl;
+        std::cerr << "Usage: " << argv[0] << " database table input_file [-m mapping_file] [-c Columnstore.xml] [-d delimiter] [-df date_format] [-n null_option] [-default_non_mapped] [-E enclose_by_character] [-C escape_character] [-rc read_cache] [-fib file_input_buffer] [-fibwt file_input_buffer_wait_time] [-clb csv_line_buffer] [-clbwt csv_line_buffer_wait_time] [-header] [-ignore_malformed_csv] [-err_log]" << std::endl;
         return 1;
     }
 
@@ -867,6 +872,7 @@ int main(int argc, char* argv[])
     std::string columnStoreXML;
     std::string inputDateFormat;
     std::int32_t nullOption = 0;
+    std::uint32_t read_cache_size = 1024 * 1024 * 2;
     std::uint32_t file_input_buffer_size = 1024 * 1024 * 200;
     std::uint32_t file_input_buffer_wait_time = 100;
     std::uint32_t csv_fields_buffer_size = 1500000;
@@ -949,6 +955,24 @@ int main(int argc, char* argv[])
             std::cerr << "Error: Couldn't parse the file input buffer parameter to an unsigned integer" << std::endl;
             return 2;
         }
+        //set the read_cache_size to 1% of the file input buffer size, if its more than 1MiB
+        if (file_input_buffer_size / 100 > 1048576) {
+            read_cache_size = file_input_buffer_size / 100;
+        }
+    }
+
+    if (input.cmdOptionExists("-rc")) {
+        try {
+            read_cache_size = std::stoi(input.getCmdOption("-rc"));
+            if (read_cache_size < 1048576) {
+                std::cerr << "Error: The given read cache parameter is out of range. A value higher than 1048575 needs to be inserted." << std::endl;
+                return 2;
+            }
+        }
+        catch (std::exception&) {
+            std::cerr << "Error: Couldn't parse the read cache parameter to an unsigned integer" << std::endl;
+            return 2;
+        }
     }
 
     if (input.cmdOptionExists("-fibwt")) {
@@ -993,7 +1017,7 @@ int main(int argc, char* argv[])
         }
     }
 
-    MCSRemoteImport* mcsimport = new MCSRemoteImport(argv[3], argv[1], argv[2], mappingFile, columnStoreXML, delimiter, inputDateFormat, default_non_mapped, escape_character, enclose_by_character, header, error_log, nullOption, ignore_malformed_csv, file_input_buffer_size, file_input_buffer_wait_time, csv_fields_buffer_size, csv_fields_buffer_wait_time);
+    MCSRemoteImport* mcsimport = new MCSRemoteImport(argv[3], argv[1], argv[2], mappingFile, columnStoreXML, delimiter, inputDateFormat, default_non_mapped, escape_character, enclose_by_character, header, error_log, nullOption, ignore_malformed_csv, file_input_buffer_size, file_input_buffer_wait_time, csv_fields_buffer_size, csv_fields_buffer_wait_time, read_cache_size);
     int32_t rtn = mcsimport->import();
     return rtn;
 }
