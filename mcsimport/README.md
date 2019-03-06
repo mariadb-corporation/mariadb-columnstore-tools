@@ -59,7 +59,7 @@ signtool.exe sign /tr http://timestamp.digicert.com /td sha256 /fd sha256 /a "Ma
 
 ## Usage
 ```shell
-mcsimport database table input_file [-m mapping_file] [-c Columnstore.xml] [-d delimiter] [-n null_option] [-df date_format] [-default_non_mapped] [-E enclose_by_character] [-C escape_character] [-header] [-ignore_malformed_csv] [-err_log]
+mcsimport database table input_file [-m mapping_file] [-c Columnstore.xml] [-d delimiter] [-n null_option] [-df date_format] [-default_non_mapped] [-E enclose_by_character] [-C escape_character] [-rc read_cache_size] [-header] [-ignore_malformed_csv] [-err_log]
 ```
 
 ### -m mapping_file
@@ -117,6 +117,9 @@ By default mcsimport uses the double-quote character `"` as enclosing character.
 
 ### -C escape_character
 By default mcsimport uses the double-quote character `"` as escaping character. It can be changed through the command line parameter -C. The escaping character's length is limited to 1.
+
+### -rc read_cache_size
+By default mcsimport uses a read cache size of 2,097,152 (2MiB) to cache chunks of the input file in RAM. It can be changed through the command line paramter -rc. A minimum cache size of 1,048,576 (1 MiB) is required.
 
 ### -header
 Choose this flag to ignore the first line of the input CSV file as header. (It won't be injected)
