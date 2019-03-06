@@ -658,7 +658,7 @@ int main(int argc, char* argv[])
 	std::string columnStoreXML;
 	std::string inputDateFormat;
 	std::int32_t nullOption = 0;
-    std::uint32_t read_cache_size = 1024 * 1024 * 2; //2MiB
+    std::uint32_t read_cache_size = 1024 * 1024 * 100; //100 MiB
 	bool default_non_mapped = false;
 	bool ignore_malformed_csv = false;
 	bool header = false;
