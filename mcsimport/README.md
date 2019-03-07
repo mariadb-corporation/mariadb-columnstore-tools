@@ -119,7 +119,7 @@ By default mcsimport uses the double-quote character `"` as enclosing character.
 By default mcsimport uses the double-quote character `"` as escaping character. It can be changed through the command line parameter -C. The escaping character's length is limited to 1.
 
 ### -rc read_cache_size
-By default mcsimport uses a read cache size of 1% of the file input buffer (2MiB) to cache chunks of the input file in RAM. It can be changed through the command line paramter -rc. A minimum cache size of 1,048,576 (1 MiB) is required.
+By default mcsimport uses a read cache size of 10% of the file input buffer (20MiB) to cache chunks of the input file in RAM. It can be changed through the command line paramter -rc. A minimum cache size of 1,048,576 (1 MiB) is required.
 
 ### -fib file_input_buffer
 By default mcsimport uses a file input buffer of 209,715,200 Byte (200 MiB) to cache the input file in RAM. It can be changed through the command line parameter -fib. A minimum file input buffer of 33,554,432 (32 MiB) is required.

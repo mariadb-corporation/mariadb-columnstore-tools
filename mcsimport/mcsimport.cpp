@@ -872,7 +872,7 @@ int main(int argc, char* argv[])
     std::string columnStoreXML;
     std::string inputDateFormat;
     std::int32_t nullOption = 0;
-    std::uint32_t read_cache_size = 1024 * 1024 * 2;
+    std::uint32_t read_cache_size = 1024 * 1024 * 20;
     std::uint32_t file_input_buffer_size = 1024 * 1024 * 200;
     std::uint32_t file_input_buffer_wait_time = 100;
     std::uint32_t csv_fields_buffer_size = 1500000;
@@ -955,9 +955,9 @@ int main(int argc, char* argv[])
             std::cerr << "Error: Couldn't parse the file input buffer parameter to an unsigned integer" << std::endl;
             return 2;
         }
-        //set the read_cache_size to 1% of the file input buffer size, if its more than 1MiB
-        if (file_input_buffer_size / 100 > 1048576) {
-            read_cache_size = file_input_buffer_size / 100;
+        //set the read_cache_size to 10% of the file input buffer size, if its more than 1MiB
+        if (file_input_buffer_size / 10 > 1048576) {
+            read_cache_size = file_input_buffer_size / 10;
         }
     }
 
