@@ -119,7 +119,7 @@ By default mcsimport uses the double-quote character `"` as enclosing character.
 By default mcsimport uses the double-quote character `"` as escaping character. It can be changed through the command line parameter -C. The escaping character's length is limited to 1.
 
 ### -rc read_cache_size
-By default mcsimport uses a read cache size of 104,857,600 (100 MiB) to cache chunks of the input file in RAM. It can be changed through the command line paramter -rc. A minimum cache size of 1,048,576 (1 MiB) is required.
+By default mcsimport uses a read cache size of 20,971,520 (20 MiB) to cache chunks of the input file in RAM. It can be changed through the command line paramter -rc. A minimum cache size of 1,048,576 (1 MiB) is required.
 
 ### -header
 Choose this flag to ignore the first line of the input CSV file as header. (It won't be injected)
