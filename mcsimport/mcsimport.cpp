@@ -316,7 +316,7 @@ private:
     uint32_t number_of_cs_table_columns = 0;
     uint32_t number_of_csv_columns = 0;
     uint32_t ignored_malformed_csv_lines = 0;
-    uint32_t read_cache_size = 1024 * 1024;
+    uint32_t read_cache_size = 1024 * 1024 * 100;
     uint64_t input_file_size = 0;
     std::string input_file;
     std::ofstream errFileStream;
@@ -872,7 +872,7 @@ int main(int argc, char* argv[])
     std::string columnStoreXML;
     std::string inputDateFormat;
     std::int32_t nullOption = 0;
-    std::uint32_t read_cache_size = 1024 * 1024 * 20;
+    std::uint32_t read_cache_size = 1024 * 1024 * 100;
     std::uint32_t file_input_buffer_size = 1024 * 1024 * 200;
     std::uint32_t file_input_buffer_wait_time = 100;
     std::uint32_t csv_fields_buffer_size = 1500000;
