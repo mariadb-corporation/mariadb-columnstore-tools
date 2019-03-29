@@ -21,6 +21,7 @@
 #include <libmcsapi/mcsapi.h>
 #include <yaml-cpp/yaml.h>
 #include <chrono>
+#include <stack>
 
 class InputParser {
 public:
@@ -45,9 +46,88 @@ private:
 	std::vector <std::string> tokens;
 };
 
+class ReadCache {
+public:
+    ReadCache(std::string input_file_name, std::uint32_t buffer_size) {
+        this->input_file_name = input_file_name;
+
+        // if the csv file is smaller than the input file buffer, use the csv file size as read_cache_size
+        this->input_file.open(input_file_name);
+        this->input_file.seekg(0, std::ios::end);
+        this->input_file_size = this->input_file.tellg();
+        if (buffer_size > this->input_file_size) {
+            this->read_cache_size = this->input_file_size;
+        }
+        else {
+            this->read_cache_size = buffer_size;
+        }
+        this->input_file.seekg(0, std::ios::beg);
+        this->read_cache = new char[read_cache_size];
+    }
+
+    ~ReadCache(){
+        if (this->input_file.is_open()) {
+            this->input_file.close();
+        }
+        if (this->read_cache != nullptr) {
+            delete[] this->read_cache;
+        }
+    }
+
+    bool eof() {
+        if (this->read_cache_pointer < this->input_file_size || !putback_stack.empty()) {
+            return false;
+        }
+        else {
+            return true;
+        }
+    }
+
+    bool get(char& c) {
+        if (!putback_stack.empty()) {
+            this->temp = putback_stack.top();
+            putback_stack.pop();
+            c = temp;
+            return true;
+        }
+        if (this->read_cache_pointer < this->input_file_size) {
+            if (this->read_cache_pointer % this->read_cache_size == 0) {
+                this->input_file.read(this->read_cache, this->read_cache_size);
+            }
+            c = this->read_cache[read_cache_pointer % read_cache_size];
+            this->read_cache_pointer++;
+            return true;
+        }
+        return false;
+    }
+
+    void putback(char c) {
+        putback_stack.push(c);
+    }
+
+    void reset() {
+        if (this->input_file.is_open()) {
+            this->input_file.close();
+        }
+        this->input_file.open(this->input_file_name);
+        this->input_file.seekg(0, std::ios::beg);
+        this->read_cache_pointer = 0;
+    }
+
+private:
+    std::uint32_t read_cache_size;
+    std::uint64_t read_cache_pointer = 0;
+    char* read_cache;
+    std::ifstream input_file;
+    std::uint64_t input_file_size;
+    std::string input_file_name;
+    std::stack<char> putback_stack;
+    char temp;
+};
+
 class MCSRemoteImport {
 public:
-	MCSRemoteImport(std::string input_file, std::string database, std::string table, std::string mapping_file, std::string columnStoreXML, char delimiter, std::string inputDateFormat, bool default_non_mapped, char escape_character, char enclose_by_character, bool header, bool error_log, std::int32_t nullOption, bool ignore_malformed_csv) {
+	MCSRemoteImport(std::string input_file, std::string database, std::string table, std::string mapping_file, std::string columnStoreXML, char delimiter, std::string inputDateFormat, bool default_non_mapped, char escape_character, char enclose_by_character, bool header, bool error_log, std::int32_t nullOption, bool ignore_malformed_csv, std::uint32_t read_cache_size) {
 		// check if we can connect to the ColumnStore database and extract the number of columns of the target table
 		try {
 			if (columnStoreXML == "") {
@@ -90,17 +170,16 @@ public:
 			clean();
 			std::exit(2);
 		}
-		std::ifstream csvFileStream(input_file);
+
+        // extract the csv header fields (if any) and number of csv columns from the first line
+        this->read_cache = new ReadCache(input_file, read_cache_size);
 		std::vector<std::string> csv_header_fields;
-		getNextCsvFields(csvFileStream, csv_header_fields);
-		if (!csvFileStream.eof()) {
-			csvFileStream.close();
-		}
+		getNextCsvFields(csv_header_fields);
+        this->read_cache->reset();
 		this->number_of_csv_columns = csv_header_fields.size();
 		if (header) {
 			this->csv_header_field_names = csv_header_fields;
 		}
-		this->input_file = input_file;
 		this->inputDateFormat = inputDateFormat;
 		this->header = header;
 
@@ -135,14 +214,13 @@ public:
 				columnstore_column_types[c] = tab.getColumn(c).getType();
 			}
 
-			std::ifstream csvFileStream(this->input_file);
 			std::vector<std::string> parsed_csv_fields;
 			// ignore the first line if it is the header
 			if (header) {
-				getNextCsvFields(csvFileStream, parsed_csv_fields);
+				getNextCsvFields(parsed_csv_fields);
 			}
 			mcsapi::columnstore_data_convert_status_t status;
-			while (getNextCsvFields(csvFileStream, parsed_csv_fields)){
+			while (getNextCsvFields(parsed_csv_fields)){
 				//throw an exception and rollback the transaction if the parsed csv vector has not the exact number of fields as specified and ignore_malformed_csv is false
  				if (parsed_csv_fields.size() != this->number_of_csv_columns && !ignore_malformed_csv) {
 					std::string errorMsg = "csv input parse error: the csv input file's columns of: " + std::to_string(parsed_csv_fields.size()) + " doesn't match the expected column count of the first line of: " + std::to_string(number_of_csv_columns) + "\nvalues: ";
@@ -250,7 +328,7 @@ private:
 	mcsapi::ColumnStoreBulkInsert* bulk = nullptr;
 	mcsapi::ColumnStoreSystemCatalog cat;
 	mcsapi::ColumnStoreSystemCatalogTable tab;
-	std::string input_file;
+    ReadCache* read_cache = nullptr;
 	std::ofstream errFileStream;
 	std::string inputDateFormat;
 	bool header;
@@ -260,8 +338,8 @@ private:
 	char escape_character;
 	char enclose_by_character;
 	std::int32_t nullOption;
-	int32_t cs_table_columns = -1;
-	int32_t number_of_csv_columns = -1;
+	std::int32_t cs_table_columns = -1;
+	std::int32_t number_of_csv_columns = -1;
 	std::vector<std::string> csv_header_field_names;
 	enum mapping_codes {COLUMNSTORE_DEFAULT_VALUE=-1, CUSTOM_DEFAULT_VALUE=-2};
 	std::map<int32_t, int32_t> mapping; // columnstore_column #, csv_column # or item of mapping_codes
@@ -460,9 +538,9 @@ private:
 	/*
 	* splits the csv file stream into a vector of parsed csv fields. returns true if the file stream is still readable, otherwise false.
 	*/
-	bool getNextCsvFields(std::ifstream& stream, std::vector<std::string>& parsed_csv_fields)
+	bool getNextCsvFields(std::vector<std::string>& parsed_csv_fields)
 	{
-		if (stream.eof()) {
+		if (this->read_cache->eof()) {
 			return false;
 		}
 		parsed_csv_fields.clear();
@@ -470,7 +548,7 @@ private:
 		bool withInEnclosed = false;
 		bool lastCharWasEscapeChar = false;
 		char ch;
-		while (stream.get(ch)) {
+		while (this->read_cache->get(ch)) {
 			if (withInEnclosed) {
 				if (lastCharWasEscapeChar) {
 					// enclose by character found
@@ -484,7 +562,7 @@ private:
 					// in case enclose by and escape character are the same and no second enclose by char was found we have to end the enclosed by here
 					else if (enclose_by_character == escape_character) {
 						withInEnclosed = false;
-						stream.putback(ch);
+						this->read_cache->putback(ch);
 					}
 					// otherwise add escape character and current character to field
 					else {
@@ -533,12 +611,8 @@ private:
 			}
 		}
 		// submit the last field if the file ended without newline
-		if (stream.eof() && (field.size() > 0  || parsed_csv_fields.size() > 0)) {
+		if (this->read_cache->eof() && (ch != '\n')) {
 			parsed_csv_fields.push_back(field);
-		}
-		// return false if file ends with an empty line
-		else if(stream.eof()) {
-			return false;
 		}
 
 		return true;
@@ -564,6 +638,9 @@ private:
 		}
 		delete this->bulk;
 		delete this->driver;
+        if (this->read_cache != nullptr) {
+            delete this->read_cache;
+        }
 	}
 };
 
@@ -571,7 +648,7 @@ int main(int argc, char* argv[])
 {
 	// Check if the command line arguments are valid
 	if (argc < 4) {
-		std::cerr << "Usage: " << argv[0] << " database table input_file [-m mapping_file] [-c Columnstore.xml] [-d delimiter] [-df date_format] [-n null_option] [-default_non_mapped] [-E enclose_by_character] [-C escape_character] [-header] [-ignore_malformed_csv] [-err_log]" << std::endl;
+		std::cerr << "Usage: " << argv[0] << " database table input_file [-m mapping_file] [-c Columnstore.xml] [-d delimiter] [-df date_format] [-n null_option] [-default_non_mapped] [-E enclose_by_character] [-C escape_character] [-rc read_cache_size] [-header] [-ignore_malformed_csv] [-err_log]" << std::endl;
 		return 1;
 	}
 
@@ -581,6 +658,7 @@ int main(int argc, char* argv[])
 	std::string columnStoreXML;
 	std::string inputDateFormat;
 	std::int32_t nullOption = 0;
+    std::uint32_t read_cache_size = 1024 * 1024 * 20; //100 MiB
 	bool default_non_mapped = false;
 	bool ignore_malformed_csv = false;
 	bool header = false;
@@ -634,6 +712,19 @@ int main(int argc, char* argv[])
 	if (input.cmdOptionExists("-df")) {
 		inputDateFormat = input.getCmdOption("-df");
 	}
+    if (input.cmdOptionExists("-rc")) {
+        try {
+            read_cache_size = std::stoi(input.getCmdOption("-rc"));
+            if (read_cache_size < 1048576) { //TODO
+                std::cerr << "Error: The given read cache parameter is out of range. A value higher than 1048575 needs to be inserted." << std::endl;
+                return 2;
+            }
+        }
+        catch (std::exception&) {
+            std::cerr << "Error: Couldn't parse the read cache parameter to an unsigned integer" << std::endl;
+            return 2;
+        }
+    }
 	if (input.cmdOptionExists("-default_non_mapped")) {
 		default_non_mapped = true;
 	}
@@ -646,7 +737,7 @@ int main(int argc, char* argv[])
 	if (input.cmdOptionExists("-err_log")) {
 		error_log = true;
 	}
-	MCSRemoteImport* mcsimport = new MCSRemoteImport(argv[3], argv[1], argv[2], mappingFile, columnStoreXML, delimiter, inputDateFormat, default_non_mapped, escape_character, enclose_by_character, header, error_log, nullOption, ignore_malformed_csv);
+	MCSRemoteImport* mcsimport = new MCSRemoteImport(argv[3], argv[1], argv[2], mappingFile, columnStoreXML, delimiter, inputDateFormat, default_non_mapped, escape_character, enclose_by_character, header, error_log, nullOption, ignore_malformed_csv, read_cache_size);
 	int32_t rtn = mcsimport->import();
 	return rtn;
 }
