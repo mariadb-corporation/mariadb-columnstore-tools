@@ -187,17 +187,7 @@ SET(ignored
     "%ignore /usr/local"
 )
 
-SET(CPACK_RPM_USER_FILELIST
-"/usr/local/mariadb/columnstore/tools/COPYRIGHT.txt"
-"/usr/local/mariadb/columnstore/tools/LICENSE.txt"
-"/usr/local/mariadb/columnstore/tools/README.md"
-"/usr/local/mariadb/columnstore/tools/VERSION"
-"/usr/local/mariadb/columnstore/tools/backuprestore/columnstoreBackup"
-"/usr/local/mariadb/columnstore/tools/backuprestore/columnstoreRestore"
-"/usr/local/mariadb/columnstore/tools/backuprestore/README.md"
-"/usr/local/mariadb/columnstore/tools/monitoring/check_mariadbcs"
-"/usr/local/mariadb/columnstore/tools/monitoring/README.md"
-${ignored})
+SET(CPACK_RPM_USER_FILELIST ${ignored})
 
 INCLUDE (CPack)
 
