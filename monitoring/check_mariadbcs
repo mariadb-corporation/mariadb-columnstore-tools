@@ -11,10 +11,9 @@
 # of this software will be governed by version 2 or later of the General
 # Public License.
 #
-MCS_DIR="/usr/local/mariadb/columnstore"
 
 # capture getSystemStatus and remove first 9 lines and blank lines to just have status table contents
-STATUS=$($MCS_DIR/bin/mcsadmin getSystemStatus | tail -n +9  | sed '/^$/d' )
+STATUS=$(mcsadmin getSystemStatus | tail -n +9  | sed '/^$/d' )
 # grab system status line
 SYSTEM_STATUS=$(echo "$STATUS" | grep 'System' | awk '{ printf $2; }')
 # combine module status lines

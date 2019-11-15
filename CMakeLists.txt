@@ -88,31 +88,6 @@ CONFIGURE_FILE(${CMAKE_CURRENT_SOURCE_DIR}/gitversionTools.in ${CMAKE_CURRENT_BI
 # Get columnstore version
 GET_COLUMNSTORE_VERSION()
 
-IF(UNIX)
-    # use, i.e. don't skip the full RPATH for the build tree
-    SET(CMAKE_SKIP_BUILD_RPATH  FALSE)
-
-    # when building, don't use the install RPATH already
-    # (but later on when installing)
-    SET(CMAKE_BUILD_WITH_INSTALL_RPATH FALSE)
-
-    SET(CMAKE_INSTALL_RPATH "${CMAKE_INSTALL_PREFIX}/${CMAKE_INSTALL_LIBDIR}")
-
-    # add the automatically determined parts of the RPATH
-    # which point to directories outside the build tree to the install RPATH
-    SET(CMAKE_INSTALL_RPATH_USE_LINK_PATH TRUE)
-
-    # the RPATH to be used when installing, but only if it's not a system directory
-    LIST(FIND CMAKE_PLATFORM_IMPLICIT_LINK_DIRECTORIES "${CMAKE_INSTALL_PREFIX}/${CMAKE_INSTALL_LIBDIR}" isSystemDir)
-    IF("${isSystemDir}" STREQUAL "-1")
-        SET(CMAKE_INSTALL_RPATH "${CMAKE_INSTALL_PREFIX}/${CMAKE_INSTALL_LIBDIR}")
-    ENDIF("${isSystemDir}" STREQUAL "-1")
-
-    SET(CMAKE_INSTALL_PREFIX "/usr/local/mariadb/columnstore")
-    SET(CPACK_RPM_PACKAGE_DEBUG 1)
-    SET(CPACK_PACKAGING_INSTALL_PREFIX ${CMAKE_INSTALL_PREFIX})
-ENDIF(UNIX)
-
 SET(CPACK_PACKAGE_NAME "mariadb-columnstore-tools")
 SET(ENGINE_ARCH "amd64")
 
@@ -128,10 +103,22 @@ IF(UNIX)
     SET(CPACK_PACKAGE_RELOCATABLE FALSE)
 ENDIF(UNIX)
 
-SET (TOOLS_DIR          "${CMAKE_INSTALL_PREFIX}/tools")
-SET (BACKUP_RESTORE_DIR "${TOOLS_DIR}/backuprestore")
-SET (MONITOR_DIR        "${TOOLS_DIR}/monitoring")
-SET (MCSIMPORT_DIR      "${TOOLS_DIR}/mcsimport")
+SET (ETCDIR "/etc/columnstore")
+SET (MARIADIR "/var/lib/mysql")
+IF (RPM)
+    SET (MYCNFDIR   "/etc/my.cnf.d")
+    SET (BINDIR     "/usr/bin")
+    SET (SUPPORTDIR "/usr/share/columnstore")
+ELSEIF (DEB)
+    SET (MYCNFDIR   "/etc/mysql/conf.d")
+    SET (BINDIR     "/usr/bin")
+    SET (SUPPORTDIR "/usr/share/columnstore")
+ELSE()
+    # TODO: prefix should probably apply here
+    SET (MYCNFDIR   "/etc/mysql")
+    SET (BINDIR     "/usr/local/bin")
+    SET (SUPPORTDIR "/usr/local/share/columnstore")
+ENDIF()
 
 IF(BACKUPRESTORE)
   ADD_SUBDIRECTORY(backuprestore)
@@ -142,10 +129,9 @@ IF(MONITORING)
 ENDIF(MONITORING)
 
 IF(UNIX)
-  INSTALL(FILES COPYRIGHT.txt LICENSE.txt README.md VERSION DESTINATION ${TOOLS_DIR} )
-  INSTALL(FILES ${CMAKE_CURRENT_BINARY_DIR}/gitversionTools DESTINATION ${TOOLS_DIR} )
+    INSTALL(FILES COPYRIGHT.txt LICENSE.txt README.md VERSION DESTINATION ${SUPPORT_DIR}/tools )
+    INSTALL(FILES ${CMAKE_CURRENT_BINARY_DIR}/gitversionTools DESTINATION ${SUPPORT_DIR}/tools )
 ENDIF(UNIX)
-#INSTALL(FILES ${CMAKE_CURRENT_BINARY_DIR}/gitversionTools DESTINATION ${TOOLS_DIR} )
 
 IF(REMOTE_CPIMPORT)
   add_subdirectory(mcsimport)

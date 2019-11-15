@@ -14,7 +14,7 @@
 VERBOSE=false
 QUIET=false
 COMPRESS=false
-INSTALL_DIR=/usr/local/mariadb/columnstore
+INSTALL_DIR=/var/lib/columnstore
 PM1=none
 BACKUP_SERVER_LOCATION=none
 DRY_RUN=false
@@ -126,7 +126,7 @@ helpPrint () {
     echo "--user=[user]     Change the user performing remote sessions. (Default: root)" 1>&3
     echo "" 1>&3
     echo "--install-dir=[PATH]  Change the install directory of ColumnStore." 1>&3
-    echo "                          Default: /usr/local/mariadb/columnstore" 1>&3
+    echo "                          Default: /var/lib/columnstore" 1>&3
     echo "" 1>&3
 }
 
@@ -394,10 +394,10 @@ fi
 getSystemInfo () {
 # Go grab PM1's columnstore.xml file and parse it to find out information on system nodes.
 moveBackupFiles Columnstore.xml ./backup.1/
-executeRsync false --link-dest=./backup.1 $REMOTE_USER@$PM1:$INSTALL_DIR/etc/Columnstore.xml $BACKUP_SERVER_LOCATION 
+executeRsync false --link-dest=./backup.1 $REMOTE_USER@$PM1:@ETCDIR@/Columnstore.xml $BACKUP_SERVER_LOCATION 
 
 moveBackupFiles releasenum ./backup.1/
-executeRsync false --link-dest=./backup.1 $REMOTE_USER@$PM1:$INSTALL_DIR/releasenum $BACKUP_SERVER_LOCATION
+executeRsync false --link-dest=./backup.1 $REMOTE_USER@$PM1:@SUPPORTDIR@/releasenum $BACKUP_SERVER_LOCATION
 
 ## parse it
 systemName=$(xmllint --xpath 'string(//SystemName)' $BACKUP_SERVER_LOCATION/Columnstore.xml)
@@ -528,11 +528,11 @@ measureDiskSpace () {
                     reportStatus 3
                 fi
                 if [ $PMwithUM == "y" ]; then
-                    command="ssh $REMOTE_USER@${pmModuleIP[$moduleID]} du -s -b $INSTALL_DIR/mysql/db"
+                    command="ssh $REMOTE_USER@${pmModuleIP[$moduleID]} du -s -b @MARIADIR@"
                     verbosePrint "$command"
                     commandReturn=$($command)
                     returnValues=($commandReturn)
-                    if [ ${returnValues[1]} == $INSTALL_DIR/mysql/db ]; then
+                    if [ ${returnValues[1]} == @MARIADIR@ ]; then
 #                        totalDiskSpaceNeeded=$(( $totalDiskSpaceNeeded + ${returnValues[0]} ))
                         totalDiskSpaceNeededPM=$(( $totalDiskSpaceNeededPM + ${returnValues[0]} ))                
                     else
@@ -707,7 +707,7 @@ do
             if [ ! -e $BACKUP_SERVER_LOCATION/$pmBackupDirDB ]; then
                 mkdir $BACKUP_SERVER_LOCATION/$pmBackupDirDB
             fi
-            executeRsync $DRY_RUN --link-dest=../backup.1/$pmBackupDirDB $REMOTE_USER@${pmModuleIP[$moduleID]}:$INSTALL_DIR/mysql/db $BACKUP_SERVER_LOCATION/$pmBackupDirDB           
+            executeRsync $DRY_RUN --link-dest=../backup.1/$pmBackupDirDB $REMOTE_USER@${pmModuleIP[$moduleID]}:@MARIADIR@ $BACKUP_SERVER_LOCATION/$pmBackupDirDB           
         fi
         if [ $activeBackups -ge $NUMBER_CONCURRENT ]; then
             waitRsyncBackground $totalDiskSpaceNeededPM $dir $activeBackups
@@ -739,7 +739,7 @@ do
     printLog "Backing up $umBackupDir"
     moveBackupFiles $umBackupDir ./backup.1/
     # Launch it in background
-    executeRsync $DRY_RUN --link-dest=../backup.1/$umBackupDir $REMOTE_USER@${umModuleIP[$moduleID]}:$INSTALL_DIR/mysql/db $BACKUP_SERVER_LOCATION/$umBackupDir
+    executeRsync $DRY_RUN --link-dest=../backup.1/$umBackupDir $REMOTE_USER@${umModuleIP[$moduleID]}:@MARIADIR@ $BACKUP_SERVER_LOCATION/$umBackupDir
 done
 
 #waitRsyncBackground $totalDiskSpaceNeededUM $dir
@@ -754,8 +754,7 @@ if [ ! -e $BACKUP_SERVER_LOCATION/$backupCnfDir ]; then
 fi
 moveBackupFiles $backupCnfDir ./backup.1/
 
-executeRsync $DRY_RUN --link-dest=../backup.1/$backupCnfDir $REMOTE_USER@$PM1:$INSTALL_DIR/mysql/my.cnf $BACKUP_SERVER_LOCATION/$backupCnfDir/
-executeRsync $DRY_RUN --link-dest=../backup.1/$backupCnfDir $REMOTE_USER@$PM1:$INSTALL_DIR/mysql/my.cnf.d $BACKUP_SERVER_LOCATION/$backupCnfDir/
+executeRsync $DRY_RUN --link-dest=../backup.1/$backupCnfDir $REMOTE_USER@$PM1:@MYCNFDIR@ $BACKUP_SERVER_LOCATION/$backupCnfDir/
 }
 
 
@@ -765,10 +764,10 @@ executeRsync $DRY_RUN --link-dest=../backup.1/$backupCnfDir $REMOTE_USER@$PM1:$I
 suspendDBWrites () {
 if [ "$DRY_RUN" = false ]; then
     if [ "$VERBOSE" = true ]; then
-        ssh $REMOTE_USER@$PM1 $INSTALL_DIR/bin/mcsadmin suspendDatabaseWrites y
+        ssh $REMOTE_USER@$PM1 mcsadmin suspendDatabaseWrites y
     else
         printLog "Suspend DB Writes"
-        ssh $REMOTE_USER@$PM1 $INSTALL_DIR/bin/mcsadmin suspendDatabaseWrites y > /dev/null
+        ssh $REMOTE_USER@$PM1 mcsadmin suspendDatabaseWrites y > /dev/null
     fi
 fi
 }
@@ -780,10 +779,10 @@ fi
 resumeDBWrites () {
 if [ "$DRY_RUN" = false ]; then
     if [ "$VERBOSE" = true ]; then
-        ssh $REMOTE_USER@$PM1 $INSTALL_DIR/bin/mcsadmin resumeDatabaseWrites y
+        ssh $REMOTE_USER@$PM1 mcsadmin resumeDatabaseWrites y
     else
         printLog "Resume DB Writes"
-        ssh $REMOTE_USER@$PM1 $INSTALL_DIR/bin/mcsadmin resumeDatabaseWrites y > /dev/null
+        ssh $REMOTE_USER@$PM1 mcsadmin resumeDatabaseWrites y > /dev/null
     fi
 fi    
 }

@@ -54,7 +54,7 @@ OPTIONS:
 --user=[user]     Change the user performing remote sessions. (Default: root)
 
 --install-dir=[PATH]  Change the install directory of ColumnStore.
-                          Default: /usr/local/mariadb/columnstore
+                          Default: /var/lib/columnstore
 ```
 
 > EXAMPLE
@@ -161,7 +161,7 @@ OPTIONS:
 --user=[user]     Change the user performing remote sessions. (Default: root)
 
 --install-dir=[PATH]  Change the install directory of ColumnStore.
-                          Default: /usr/local/mariadb/columnstore
+                          Default: /var/lib/columnstore
 
 ```
 > EXAMPLE

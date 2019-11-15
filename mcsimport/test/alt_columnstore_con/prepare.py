@@ -2,7 +2,7 @@ def prepare_test(test_directory):
     import os
     from shutil import copyfile
 
-    cs_xml = "/usr/local/mariadb/columnstore/etc/Columnstore.xml"
+    cs_xml = "/etc/columnstore/Columnstore.xml"
     if os.environ.get("COLUMNSTORE_INSTALL_DIR") is not None:
         cs_xml=os.path.join(os.path.join(os.environ.get("COLUMNSTORE_INSTALL_DIR"),'etc'),'Columnstore.xml')
     
