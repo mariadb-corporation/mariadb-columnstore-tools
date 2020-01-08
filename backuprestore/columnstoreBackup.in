@@ -101,7 +101,11 @@ helpPrint () {
     echo "MariaDB ColumnStore was installed and maintained. (Assumes root by default)" 1>&3
     echo "" 1>&3
     echo "The default behavior is to run rsync locally to each UM and PM." 1>&3
+    echo "For internal storage:" 1>&3
     echo "PM data is stored in data directories labeled pm[moduleID]dbroot[DBrootID]" 1>&3
+    echo "For storagemanager (S3):" 1>&3
+    echo "PM metadata is store at ${HOME}/storagemanager/metadata" 1>&3
+    echo "PM data is stored in an S3 bucket and is backed up via snapshot." 1>&3
     echo "UM data is stored in directories labeled um[moduleID]" 1>&3
     echo "my.cnf data is stored in directory cnf" 1>&3
     echo "Columnstore.xml is stored in the top level of backupServerLocation" 1>&3
@@ -389,6 +393,40 @@ fi
 }
 
 ###############################################################################
+# create a backup-s3-bucket (should only create {NUMBER_BACKUPS} buckets)
+# empty it if it exists
+# cp current bucket to backup
+# save the bucket info to storagemanager.cnf file
+###############################################################################
+s3Backup () {
+
+    if [ -e $BACKUP_SERVER_LOCATION/s3Bucket.dat ]; then    
+        if [ "$DRY_RUN" = false ]; then
+            moveBackupFiles $BACKUP_SERVER_LOCATION/s3Bucket.dat ./backup.1/
+        fi   
+        source $BACKUP_SERVER_LOCATION/s3Bucket.dat
+        rm $BACKUP_SERVER_LOCATION/s3Bucket.dat
+        ((previousBackupNumber++))
+    else
+        previousBackupNumber=1
+    fi
+    backupS3Bucket=${s3Bucket}-backup-${previousbackupNumber}
+
+    if [ "$DRY_RUN" = false ]; then
+        echo "previousBackupNumber=${previousBackupNumber}" >> $BACKUP_SERVER_LOCATION/s3Bucket.dat
+        #verbosePrint "backupBucket = ${backupS3Bucket}"
+        result=$(aws s3 rb s3://${backupS3Bucket} --force)
+        #verbosePrint "rb = ${result}"
+        result=$(aws s3 mb s3://${backupS3Bucket} --region ${s3Region})
+        #verbosePrint "mb = ${result}"
+        result=$(aws s3api put-public-access-block --bucket ${backupS3Bucket} --public-access-block-configuration "BlockPublicAcls=true,IgnorePublicAcls=true,BlockPublicPolicy=true,RestrictPublicBuckets=true")
+        #verbosePrint "result = ${result}"
+        result=$(aws s3 sync s3://${s3Bucket} s3://${backupS3Bucket})
+        #verbosePrint "result = ${result}"
+    fi
+}
+
+###############################################################################
 # Get the system info from provided PM1
 ###############################################################################
 getSystemInfo () {
@@ -410,10 +448,28 @@ umModuleCount=$(xmllint --xpath "string(//ModuleCount2)" $BACKUP_SERVER_LOCATION
 pmModuleCount=$(xmllint --xpath "string(//ModuleCount3)" $BACKUP_SERVER_LOCATION/Columnstore.xml)
 
 DBRootCount=$(xmllint --xpath 'string(//DBRootCount)' $BACKUP_SERVER_LOCATION/Columnstore.xml)
-for (( dbRootID=1; dbRootID<=$DBRootCount; dbRootID++ ))
-do
-    DBRoot[$dbRootID]=$(xmllint --xpath "string(//DBRoot$dbRootID)" $BACKUP_SERVER_LOCATION/Columnstore.xml)
-done
+
+if [ $DBRootStorageType == "storagemanager" ]; then
+    moveBackupFiles storagemanager.cnf ./backup.1/
+    executeRsync false --link-dest=./backup.1 $REMOTE_USER@$PM1:@ETCDIR@/storagemanager.cnf $BACKUP_SERVER_LOCATION
+
+    # get the storagemanager metadirectory
+    metaDataPath=$(awk '/^metadata_path/{print $3}' $BACKUP_SERVER_LOCATION/storagemanager.cnf)
+    # get the storagemanager s3 endpoint region and bucket
+    s3Endpoint=$(awk '/^endpoint/{print $3}' $BACKUP_SERVER_LOCATION/storagemanager.cnf)
+    s3Region=$(awk '/^region/{print $3}' $BACKUP_SERVER_LOCATION/storagemanager.cnf)
+    s3Bucket=$(awk '/^bucket/{print $3}' $BACKUP_SERVER_LOCATION/storagemanager.cnf)
+    if [ $REMOTE_USER == "root" ]; then
+        metaDirectory=${metaDataPath/'${HOME}'//$REMOTE_USER}
+    else
+        metaDirectory=${metaDataPath/'${HOME}'//home/$REMOTE_USER}
+    fi
+else
+    for (( dbRootID=1; dbRootID<=$DBRootCount; dbRootID++ ))
+    do
+        DBRoot[$dbRootID]=$(xmllint --xpath "string(//DBRoot$dbRootID)" $BACKUP_SERVER_LOCATION/Columnstore.xml)
+    done
+fi
 
 if [ $singleServerInstall == "n" ]; then
     detectError=false
@@ -515,17 +571,30 @@ measureDiskSpace () {
         do
             for (( moduleDBRootID=1; moduleDBRootID<=${pmModuleDBRootCount[$moduleID]}; moduleDBRootID++ ))
             do
-                thisDBrootID=$(xmllint --xpath "string(//ModuleDBRootID$moduleID-$moduleDBRootID-3)" $BACKUP_SERVER_LOCATION/Columnstore.xml)
-                command="ssh $REMOTE_USER@${pmModuleIP[$moduleID]} du -s -b ${DBRoot[$thisDBrootID]}"
-                verbosePrint "$command"
-                commandReturn=$($command)
-                returnValues=($commandReturn)
-                if [ ${returnValues[1]} == ${DBRoot[$thisDBrootID]} ]; then
-#                    totalDiskSpaceNeeded=$(( $totalDiskSpaceNeeded + ${returnValues[0]} ))
-                    totalDiskSpaceNeededPM=$(( $totalDiskSpaceNeededPM + ${returnValues[0]} ))                
+                if [ $DBRootStorageType == "storagemanager" ]; then
+                    # just need to check metadata directory since data is all in S3 bucket
+                    command="ssh $REMOTE_USER@${pmModuleIP[$moduleID]} du -s -b ${metaDirectory}"
+                    verbosePrint "$command"
+                    commandReturn=$($command)
+                    returnValues=($commandReturn)
+                    if [ ${returnValues[1]} == ${metaDirectory} ]; then
+                        totalDiskSpaceNeededPM=$(( $totalDiskSpaceNeededPM + ${returnValues[0]} ))                
+                    else
+                        printLog "failed return from command: $command" >&2
+                        reportStatus 3
+                    fi
                 else
-                    printLog "failed return from command: $command" >&2
-                    reportStatus 3
+                    thisDBrootID=$(xmllint --xpath "string(//ModuleDBRootID$moduleID-$moduleDBRootID-3)" $BACKUP_SERVER_LOCATION/Columnstore.xml)
+                    command="ssh $REMOTE_USER@${pmModuleIP[$moduleID]} du -s -b ${DBRoot[$thisDBrootID]}"
+                    verbosePrint "$command"
+                    commandReturn=$($command)
+                    returnValues=($commandReturn)
+                    if [ ${returnValues[1]} == ${DBRoot[$thisDBrootID]} ]; then
+                        totalDiskSpaceNeededPM=$(( $totalDiskSpaceNeededPM + ${returnValues[0]} ))                
+                    else
+                        printLog "failed return from command: $command" >&2
+                        reportStatus 3
+                    fi
                 fi
                 if [ $PMwithUM == "y" ]; then
                     command="ssh $REMOTE_USER@${pmModuleIP[$moduleID]} du -s -b @MARIADIR@"
@@ -533,7 +602,6 @@ measureDiskSpace () {
                     commandReturn=$($command)
                     returnValues=($commandReturn)
                     if [ ${returnValues[1]} == @MARIADIR@ ]; then
-#                        totalDiskSpaceNeeded=$(( $totalDiskSpaceNeeded + ${returnValues[0]} ))
                         totalDiskSpaceNeededPM=$(( $totalDiskSpaceNeededPM + ${returnValues[0]} ))                
                     else
                         printLog "failed return from command: $command" >&2
@@ -690,16 +758,25 @@ for (( moduleID=1; moduleID<=$pmModuleCount; moduleID++ ))
 do
     for (( moduleDBRootID=1; moduleDBRootID<=${pmModuleDBRootCount[$moduleID]}; moduleDBRootID++ ))
     do
-        thisDBrootID=$(xmllint --xpath "string(//ModuleDBRootID$moduleID-$moduleDBRootID-3)" $BACKUP_SERVER_LOCATION/Columnstore.xml)
         pmBackupDir="pm""$moduleID""dbroot""$moduleDBRootID"
         if [ ! -e $BACKUP_SERVER_LOCATION/$pmBackupDir ]; then
             mkdir $BACKUP_SERVER_LOCATION/$pmBackupDir
         fi
-        printLog "Backing up $pmBackupDir"
-        moveBackupFiles $pmBackupDir ./backup.1/
-        # Launch it in background
-        executeRsyncBackground $DRY_RUN /$dir/$pmBackupDir "--copy-links --link-dest=../backup.1/$pmBackupDir" $REMOTE_USER@${pmModuleIP[$moduleID]}:${DBRoot[$thisDBrootID]} $BACKUP_SERVER_LOCATION/$pmBackupDir
-        ((activeBackups++))
+        if [ $DBRootStorageType == "storagemanager" ]; then
+            ## rsync it over
+            printLog "Backing up $pmBackupDir metadata"
+            moveBackupFiles $pmBackupDir ./backup.1/
+            # Launch it in background
+            executeRsyncBackground $DRY_RUN /$dir/$pmBackupDir "--copy-links --link-dest=../backup.1/$pmBackupDir" $REMOTE_USER@${pmModuleIP[$moduleID]}:${metaDirectory} $BACKUP_SERVER_LOCATION/$pmBackupDir
+            ((activeBackups++))
+        else
+            thisDBrootID=$(xmllint --xpath "string(//ModuleDBRootID$moduleID-$moduleDBRootID-3)" $BACKUP_SERVER_LOCATION/Columnstore.xml)
+            printLog "Backing up $pmBackupDir"
+            moveBackupFiles $pmBackupDir ./backup.1/
+            # Launch it in background
+            executeRsyncBackground $DRY_RUN /$dir/$pmBackupDir "--copy-links --link-dest=../backup.1/$pmBackupDir" $REMOTE_USER@${pmModuleIP[$moduleID]}:${DBRoot[$thisDBrootID]} $BACKUP_SERVER_LOCATION/$pmBackupDir
+            ((activeBackups++))
+        fi
         
         if [ $PMwithUM == "y" ]; then
             pmBackupDirDB="pm"$moduleID"DB"
@@ -718,6 +795,10 @@ do
 done
 if [ $activeBackups -gt 0 ]; then
     waitRsyncBackground $totalDiskSpaceNeededPM $dir $activeBackups
+fi
+if [ $DBRootStorageType == "storagemanager" ]; then
+    printLog "Creating SnapShot of S3 Bucket: "
+    s3Backup
 fi
 printLog "DONE"
 }
@@ -829,10 +910,14 @@ do
 done
 
 verbosePrint "DBRootCount: $DBRootCount"
-for (( dbRootID=1; dbRootID<=$DBRootCount; dbRootID++ ))
-do
-    verbosePrint "DBRoot$dbRootID: ${DBRoot[$dbRootID]}"
-done
+if [ $DBRootStorageType == "storagemanager" ]; then
+    verbosePrint "Metadata Location: ${metaDirectory}"
+else
+    for (( dbRootID=1; dbRootID<=$DBRootCount; dbRootID++ ))
+    do
+        verbosePrint "DBRoot$dbRootID: ${DBRoot[$dbRootID]}"
+    done
+fi
 
 ## Measure disk space usage and compare to available
 measureDiskSpace
