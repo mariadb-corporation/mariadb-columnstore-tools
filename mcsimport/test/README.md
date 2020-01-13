@@ -19,6 +19,40 @@ pip2 install -r requirements.txt
 By default the test suite uses the default Columnstore.xml residing in `/etc/columnstore/Columnstore.xml` for the bulk injection and a JDBC connection with user `root` on `127.0.0.1` without password to execute DDL.  
 This is fine for local ColumnStore installations on Linux. On Windows and for remote tests these parameters need to be overwritten through the environment variables `COLUMNSTORE_INSTALL_DIR`, `MCSAPI_CS_TEST_IP`, `MCSAPI_CS_TEST_USER`, and `MCSAPI_CS_TEST_PASSWORD`.
 
+### For SkySQL
+Create Columnstore SkySQL Service.
+Establish mcsimport bulk data secure tunnel to the Columnstore SkySQL Service.
+https://dlm.mariadb.com/skysql-misc-utilities/skymcsapitunnel/skysql-columnstore-mcsapi-tunnel.sh ;
+Copy the generated Columnstore.xml to the default suite path: 
+/usr/local/mariadb/columnstore/etc/  
+
+Set the test suit Environment Parameters get from your SkySQL Service Cluster and DB Pages.
+Copy the Kubernates Cluster SSL Certificate and set the path to the cert.crt.pem file.
+For example:
+```
+MCSAPI_CS_TEST_IP=sky0001379.mdb0001293.test.skysql.net
+MCSAPI_CS_TEST_PORT=5004
+MCSAPI_CS_TEST_USER=DB00002165
+MCSAPI_CS_TEST_PASSWORD='your_service_password'
+MCSAPI_CS_TEST_SSL=1
+MCSAPI_CS_TEST_SSL_CA='/home/QA/mariadb-columnstore-tools/mcsimport/test/cert.crt.pem'
+WAIT_CASE=5
+
+export MCSAPI_CS_TEST_IP
+export MCSAPI_CS_TEST_PORT
+export MCSAPI_CS_TEST_USER
+export MCSAPI_CS_TEST_PASSWORD
+export MCSAPI_CS_TEST_SSL
+export MCSAPI_CS_TEST_SSL_CA
+export WAIT_CASE 
+```
+
+Run the mcsimport test suite:
+`./test.py mcsimport`
+mcsimport test suite is executed to the mcs SkySQL Service; DDL are done through the Columnstore Service Read/Write Port with SSl; mcsimport is executed through Columnstore Service bulk data ports and secured tunnel.
+
+
+
 ## Test definition
 Here a short summary how a test can be designed.
 
