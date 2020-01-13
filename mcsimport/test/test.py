@@ -1,6 +1,7 @@
 #!/usr/bin/python
 
 import os, sys, subprocess, datetime, yaml, csv, random, time
+import ssl
 import mysql.connector as mariadb
 
 DB_NAME = 'test'
@@ -27,12 +28,52 @@ def executeTestSuite():
     user = "root"
     global host
     host = "localhost"
+    global port
+    port = 3306
     if os.environ.get("MCSAPI_CS_TEST_IP") is not None:
         host=os.environ.get("MCSAPI_CS_TEST_IP")
     if os.environ.get("MCSAPI_CS_TEST_USER") is not None:
         user=os.environ.get("MCSAPI_CS_TEST_USER")
+    if os.environ.get("MCSAPI_CS_TEST_PORT") is not None:
+        port=int(os.environ.get("MCSAPI_CS_TEST_PORT"))
     global password
     password = os.environ.get("MCSAPI_CS_TEST_PASSWORD")
+    global ssl_disabled
+    ssl_disabled = False
+    global ssl_ca
+    ssl_ca=''
+    global ssl_version
+    global user_cred
+    global SSL
+    SSL = 0 
+    if os.environ.get("MCSAPI_CS_TEST_SSL") is not None:
+        SSl=os.environ.get("MCSAPI_CS_TEST_SSL")
+    if os.environ.get("MCSAPI_CS_TEST_SSL_CA") is not None:
+        ssl_ca=os.environ.get("MCSAPI_CS_TEST_SSL_CA")
+    ssl_version=ssl.PROTOCOL_TLSv1_2
+    global wait_case
+    wait_case = 0
+    if os.environ.get("WAIT_CASE") is not None:
+        wait_case=int(os.environ.get("WAIT_CASE"))
+    print(wait_case) 
+    if SSL == 1:
+                user_cred = {
+                            'user': user,
+                            'password': password,
+                            'host': host,
+                            'port': port,
+                            'database': DB_NAME
+                             }
+    else:            
+           user_cred = {
+                      'user': user,
+                      'password': password,
+                      'host': host,
+                      'port':  port,
+                      'ssl_ca': ssl_ca,
+                      'ssl_version': ssl_version,
+                      'database': DB_NAME
+                      }
 
     # test execution main loop
     print("")
@@ -169,8 +210,9 @@ def loadTestConfig(test_directory):
 # executes the SQL statements of given file to set up the test table
 def prepareColumnstoreTable(file, table):
     error = False
+    time.sleep(wait_case)
     try:
-        conn = mariadb.connect(user=user, password=password, host=host, database=DB_NAME)
+        conn = mariadb.connect(**user_cred)
         cursor = conn.cursor();
         cursor.execute("DROP TABLE IF EXISTS %s" %(table,))
         with open(file) as f:
@@ -254,7 +296,7 @@ def executeMcsimport(test_directory,testConfig):
 def validateInjection(test_directory,table,validationCoverage):
     error = False
     try:
-        conn = mariadb.connect(user=user, password=password, host=host, database=DB_NAME)
+        conn = mariadb.connect(**user_cred)
         cursor = conn.cursor();
         # validate that the number of rows of expected.csv and target table match
         cursor.execute("SELECT COUNT(*) AS cnt FROM %s" % (table,))
@@ -302,7 +344,7 @@ def validateInjection(test_directory,table,validationCoverage):
 def cleanUpColumnstoreTable(table):
     error = False
     try:
-        conn = mariadb.connect(user=user, password=password, host=host, database=DB_NAME)
+        conn = mariadb.connect(**user_cred)
         cursor = conn.cursor();
         cursor.execute("DROP TABLE IF EXISTS %s" %(table,))
     except mariadb.Error as err:
