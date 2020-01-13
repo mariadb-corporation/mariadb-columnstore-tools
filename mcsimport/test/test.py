@@ -44,10 +44,10 @@ def executeTestSuite():
     ssl_ca=''
     global ssl_version
     global user_cred
-    global SSL
-    SSL = 0 
+    global ssl_flag
+    ssl_flag = 0 
     if os.environ.get("MCSAPI_CS_TEST_SSL") is not None:
-        SSl=os.environ.get("MCSAPI_CS_TEST_SSL")
+        ssl_flag=os.environ.get("MCSAPI_CS_TEST_SSL")
     if os.environ.get("MCSAPI_CS_TEST_SSL_CA") is not None:
         ssl_ca=os.environ.get("MCSAPI_CS_TEST_SSL_CA")
     ssl_version=ssl.PROTOCOL_TLSv1_2
@@ -55,8 +55,7 @@ def executeTestSuite():
     wait_case = 0
     if os.environ.get("WAIT_CASE") is not None:
         wait_case=int(os.environ.get("WAIT_CASE"))
-    print(wait_case) 
-    if SSL == 1:
+    if ssl_flag == 0:
                 user_cred = {
                             'user': user,
                             'password': password,
