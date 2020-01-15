@@ -401,28 +401,28 @@ fi
 s3Backup () {
 
     if [ -e $BACKUP_SERVER_LOCATION/s3Bucket.dat ]; then    
+        source $BACKUP_SERVER_LOCATION/s3Bucket.dat
+        ((previousBackupNumber++))
         if [ "$DRY_RUN" = false ]; then
             moveBackupFiles $BACKUP_SERVER_LOCATION/s3Bucket.dat ./backup.1/
+            rm $BACKUP_SERVER_LOCATION/s3Bucket.dat
         fi   
-        source $BACKUP_SERVER_LOCATION/s3Bucket.dat
-        rm $BACKUP_SERVER_LOCATION/s3Bucket.dat
-        ((previousBackupNumber++))
     else
         previousBackupNumber=1
     fi
-    backupS3Bucket=${s3Bucket}-backup-${previousbackupNumber}
+    backupS3Bucket=${s3Bucket}-backup-${previousBackupNumber}
+    verbosePrint "backupBucket = ${backupS3Bucket}"
 
     if [ "$DRY_RUN" = false ]; then
         echo "previousBackupNumber=${previousBackupNumber}" >> $BACKUP_SERVER_LOCATION/s3Bucket.dat
-        #verbosePrint "backupBucket = ${backupS3Bucket}"
-        result=$(aws s3 rb s3://${backupS3Bucket} --force)
-        #verbosePrint "rb = ${result}"
-        result=$(aws s3 mb s3://${backupS3Bucket} --region ${s3Region})
-        #verbosePrint "mb = ${result}"
-        result=$(aws s3api put-public-access-block --bucket ${backupS3Bucket} --public-access-block-configuration "BlockPublicAcls=true,IgnorePublicAcls=true,BlockPublicPolicy=true,RestrictPublicBuckets=true")
-        #verbosePrint "result = ${result}"
-        result=$(aws s3 sync s3://${s3Bucket} s3://${backupS3Bucket})
-        #verbosePrint "result = ${result}"
+        result=$(aws --endpoint-url ${s3Endpoint} s3 rb s3://${backupS3Bucket} --force)
+        verbosePrint "rb = ${result}"
+        result=$(aws --endpoint-url ${s3Endpoint} s3 mb s3://${backupS3Bucket} --region ${s3Region})
+        verbosePrint "mb = ${result}"
+        result=$(aws --endpoint-url ${s3Endpoint} s3api put-public-access-block --bucket ${backupS3Bucket} --public-access-block-configuration "BlockPublicAcls=true,IgnorePublicAcls=true,BlockPublicPolicy=true,RestrictPublicBuckets=true")
+        verbosePrint "result = ${result}"
+        result=$(aws --endpoint-url ${s3Endpoint} s3 sync s3://${s3Bucket} s3://${backupS3Bucket})
+        verbosePrint "result = ${result}"
     fi
 }
 
@@ -459,6 +459,10 @@ if [ $DBRootStorageType == "storagemanager" ]; then
     s3Endpoint=$(awk '/^endpoint/{print $3}' $BACKUP_SERVER_LOCATION/storagemanager.cnf)
     s3Region=$(awk '/^region/{print $3}' $BACKUP_SERVER_LOCATION/storagemanager.cnf)
     s3Bucket=$(awk '/^bucket/{print $3}' $BACKUP_SERVER_LOCATION/storagemanager.cnf)
+    if [ -z $s3Endpoint]; then
+        s3Endpoint="s3."${s3Region}".amazonaws.com"
+    fi
+    s3Endpoint="https://"${s3Endpoint}
     if [ $REMOTE_USER == "root" ]; then
         metaDirectory=${metaDataPath/'${HOME}'//$REMOTE_USER}
     else
