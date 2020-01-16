@@ -788,7 +788,7 @@ do
             if [ ! -e $BACKUP_SERVER_LOCATION/$pmBackupDirDB ]; then
                 mkdir $BACKUP_SERVER_LOCATION/$pmBackupDirDB
             fi
-            executeRsync $DRY_RUN --link-dest=../backup.1/$pmBackupDirDB $REMOTE_USER@${pmModuleIP[$moduleID]}:@MARIADIR@ $BACKUP_SERVER_LOCATION/$pmBackupDirDB           
+            executeRsync $DRY_RUN --link-dest=../backup.1/$pmBackupDirDB $REMOTE_USER@${pmModuleIP[$moduleID]}:@MARIADIR@/ $BACKUP_SERVER_LOCATION/$pmBackupDirDB           
         fi
         if [ $activeBackups -ge $NUMBER_CONCURRENT ]; then
             waitRsyncBackground $totalDiskSpaceNeededPM $dir $activeBackups
@@ -824,7 +824,7 @@ do
     printLog "Backing up $umBackupDir"
     moveBackupFiles $umBackupDir ./backup.1/
     # Launch it in background
-    executeRsync $DRY_RUN --link-dest=../backup.1/$umBackupDir $REMOTE_USER@${umModuleIP[$moduleID]}:@MARIADIR@ $BACKUP_SERVER_LOCATION/$umBackupDir
+    executeRsync $DRY_RUN --link-dest=../backup.1/$umBackupDir $REMOTE_USER@${umModuleIP[$moduleID]}:@MARIADIR@/ $BACKUP_SERVER_LOCATION/$umBackupDir
 done
 
 #waitRsyncBackground $totalDiskSpaceNeededUM $dir
@@ -839,7 +839,7 @@ if [ ! -e $BACKUP_SERVER_LOCATION/$backupCnfDir ]; then
 fi
 moveBackupFiles $backupCnfDir ./backup.1/
 
-executeRsync $DRY_RUN --link-dest=../backup.1/$backupCnfDir $REMOTE_USER@$PM1:@MYCNFDIR@ $BACKUP_SERVER_LOCATION/$backupCnfDir/
+executeRsync $DRY_RUN --link-dest=../backup.1/$backupCnfDir $REMOTE_USER@$PM1:@MYCNFDIR@/ $BACKUP_SERVER_LOCATION/$backupCnfDir/
 }
 
 
