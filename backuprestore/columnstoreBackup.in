@@ -415,14 +415,12 @@ s3Backup () {
 
     if [ "$DRY_RUN" = false ]; then
         echo "previousBackupNumber=${previousBackupNumber}" >> $BACKUP_SERVER_LOCATION/s3Bucket.dat
-        result=$(aws --endpoint-url ${s3Endpoint} s3 rb s3://${backupS3Bucket} --force)
-        verbosePrint "rb = ${result}"
-        result=$(aws --endpoint-url ${s3Endpoint} s3 mb s3://${backupS3Bucket} --region ${s3Region})
-        verbosePrint "mb = ${result}"
-        result=$(aws --endpoint-url ${s3Endpoint} s3api put-public-access-block --bucket ${backupS3Bucket} --public-access-block-configuration "BlockPublicAcls=true,IgnorePublicAcls=true,BlockPublicPolicy=true,RestrictPublicBuckets=true")
-        verbosePrint "result = ${result}"
-        result=$(aws --endpoint-url ${s3Endpoint} s3 sync s3://${s3Bucket} s3://${backupS3Bucket})
-        verbosePrint "result = ${result}"
+        result=$(gsutil -m rm -r gs://${backupS3Bucket})
+        printLog "rb = ${result}"
+        result=$(gsutil mb -l ${s3Region} gs://${backupS3Bucket})
+        printLog "mb = ${result}"
+        result=$(gsutil -m rsync -d -r gs://${s3Bucket} gs://${backupS3Bucket})
+        printLog "rsync = ${result}"
     fi
 }
 

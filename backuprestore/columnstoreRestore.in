@@ -339,12 +339,12 @@ s3Restore () {
     backupS3Bucket=${backup_s3Bucket}-backup-${previousBackupNumber}
     verbosePrint "restoreBucket = ${restore_s3Bucket}"
     if [ "$DRY_RUN" = false ]; then
-        result=$(aws --endpoint-url ${restore_s3Endpoint} s3 rb s3://${restore_s3Bucket} --force)
+        result=$(gsutil -m rm -r gs://${restore_s3Bucket})
         verbosePrint "rb = ${result}"
-        result=$(aws --endpoint-url ${restore_s3Endpoint} s3 mb s3://${restore_s3Bucket} --region ${restore_s3Region})
+        result=$(gsutil mb -l ${restore_s3Region} gs://${restore_s3Bucket})
         verbosePrint "mb = ${result}"
-        result=$(aws --endpoint-url ${restore_s3Endpoint} s3 sync s3://${backupS3Bucket} s3://${restore_s3Bucket})
-        verbosePrint "sync = ${result}"
+        result=$(gsutil -m rsync -d -r gs://${backupS3Bucket} gs://${restore_s3Bucket})
+        verbosePrint "rsync = ${result}"
     fi
 }
 
