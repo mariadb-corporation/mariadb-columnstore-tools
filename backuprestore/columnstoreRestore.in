@@ -336,15 +336,30 @@ fi
 s3Restore () {
 
     source $BACKUP_SERVER_LOCATION/s3Bucket.dat
-    backupS3Bucket=${backup_s3Bucket}-backup-${previousBackupNumber}
+    verbosePrint "backupBucket = ${backupS3Bucket}"
     verbosePrint "restoreBucket = ${restore_s3Bucket}"
+    
     if [ "$DRY_RUN" = false ]; then
-        result=$(gsutil -m rm -r gs://${restore_s3Bucket})
-        verbosePrint "rb = ${result}"
-        result=$(gsutil mb -l ${restore_s3Region} gs://${restore_s3Bucket})
-        verbosePrint "mb = ${result}"
-        result=$(gsutil -m rsync -d -r gs://${backupS3Bucket} gs://${restore_s3Bucket})
-        verbosePrint "rsync = ${result}"
+        case $restore_s3Endpoint in
+          *googleapis*)
+            result=$(gsutil -m rm -r gs://${restore_s3Bucket})
+            verbosePrint "rb = ${result}"
+            result=$(gsutil mb -l ${restore_s3Region} gs://${restore_s3Bucket})
+            verbosePrint "mb = ${result}"
+            result=$(gsutil -m rsync -d -r gs://${backupS3Bucket} gs://${restore_s3Bucket})
+            verbosePrint "rsync = ${result}"
+            ;;
+          *amazonaws*)
+            result=$(aws --endpoint-url ${restore_s3Endpoint} s3 rb s3://${restore_s3Bucket} --force)
+            verbosePrint "rb = ${result}"
+            result=$(aws --endpoint-url ${restore_s3Endpoint} s3 mb s3://${restore_s3Bucket} --region ${restore_s3Region})
+            verbosePrint "mb = ${result}"
+            result=$(aws --endpoint-url ${restore_s3Endpoint} s3api put-public-access-block --bucket ${restore_s3Bucket} --public-access-block-configuration "BlockPublicAcls=true,IgnorePublicAcls=true,BlockPublicPolicy=true,RestrictPublicBuckets=true")
+            verbosePrint "permissions = ${result}"
+            result=$(aws --endpoint-url ${restore_s3Endpoint} s3 sync s3://${backupS3Bucket} s3://${restore_s3Bucket})
+            verbosePrint "sync = ${result}"
+            ;;
+        esac
     fi
 }
 
@@ -531,6 +546,16 @@ if [ $backup_DBRootStorageType == "storagemanager" ]; then
     if [ ! -e $BACKUP_SERVER_LOCATION/s3Bucket.dat ]; then
         printLog "ERROR: cannot find to s3Bucket.dat" >&2
         detectError=true
+    fi
+    if [ -z $backup_s3Endpoint]; then
+        backup_s3Endpoint="s3."${backup_s3Region}".amazonaws.com"
+    fi
+    backup_s3Endpoint="https://"${backup_s3Endpoint}
+    if [ $backup_s3Endpoint != $restore_s3Endpoint ]; then
+        printLog "ERROR: Different endpoint detected for S3:" >&2
+        printLog "Restore S3 Endpoint: $restore_s3Endpoint" >&2
+        printLog "Backup  S3 Endpoint: $backup_s3Endpoint" >&2
+        errorDetected=true
     fi
 fi
 

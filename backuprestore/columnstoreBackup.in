@@ -29,6 +29,7 @@ SIZE_NEEDED_TEST=0
 exec 3>&1 1>>${LOG_FILE} 2>&1
 
 startTime=`date +%s`
+s3BackupTime=`date "+%Y-%m-%d-%H-%M-%S"`
 
 printLog () {
     LOGTIME="[`date "+%Y-%m-%d %H:%M:%S"`] "
@@ -400,27 +401,38 @@ fi
 ###############################################################################
 s3Backup () {
 
-    if [ -e $BACKUP_SERVER_LOCATION/s3Bucket.dat ]; then    
-        source $BACKUP_SERVER_LOCATION/s3Bucket.dat
-        ((previousBackupNumber++))
-        if [ "$DRY_RUN" = false ]; then
+    if [ "$DRY_RUN" = false ]; then
+        if [ -e $BACKUP_SERVER_LOCATION/s3Bucket.dat ]; then    
             moveBackupFiles $BACKUP_SERVER_LOCATION/s3Bucket.dat ./backup.1/
             rm $BACKUP_SERVER_LOCATION/s3Bucket.dat
-        fi   
-    else
-        previousBackupNumber=1
-    fi
-    backupS3Bucket=${s3Bucket}-backup-${previousBackupNumber}
-    verbosePrint "backupBucket = ${backupS3Bucket}"
+        fi
+        
+        backupS3Bucket=${s3Bucket}-backup-${s3BackupTime}
+        verbosePrint "backupBucket = ${backupS3Bucket}"
 
-    if [ "$DRY_RUN" = false ]; then
-        echo "previousBackupNumber=${previousBackupNumber}" >> $BACKUP_SERVER_LOCATION/s3Bucket.dat
-        result=$(gsutil -m rm -r gs://${backupS3Bucket})
-        printLog "rb = ${result}"
-        result=$(gsutil mb -l ${s3Region} gs://${backupS3Bucket})
-        printLog "mb = ${result}"
-        result=$(gsutil -m rsync -d -r gs://${s3Bucket} gs://${backupS3Bucket})
-        printLog "rsync = ${result}"
+        echo "backupS3Bucket=${backupS3Bucket}" >> $BACKUP_SERVER_LOCATION/s3Bucket.dat
+    
+        case $s3Endpoint in
+          *googleapis*)
+            result=$(gsutil -m rm -r gs://${backupS3Bucket})
+            verbosePrint "rb = ${result}"
+            result=$(gsutil mb -l ${s3Region} gs://${backupS3Bucket})
+            verbosePrint "mb = ${result}"
+            result=$(gsutil -m rsync -d -r gs://${s3Bucket} gs://${backupS3Bucket})
+            verbosePrint "rsync = ${result}"
+            ;;
+          *amazonaws*)
+            result=$(aws --endpoint-url ${s3Endpoint} s3 rb s3://${backupS3Bucket} --force)
+            verbosePrint "rb = ${result}"
+            result=$(aws --endpoint-url ${s3Endpoint} s3 mb s3://${backupS3Bucket} --region ${s3Region})
+            verbosePrint "mb = ${result}"
+            result=$(aws --endpoint-url ${s3Endpoint} s3api put-public-access-block --bucket ${backupS3Bucket} --public-access-block-configuration "BlockPublicAcls=true,IgnorePublicAcls=true,BlockPublicPolicy=true,RestrictPublicBuckets=true")
+            verbosePrint "permissions = ${result}"
+            result=$(aws --endpoint-url ${s3Endpoint} s3 sync s3://${s3Bucket} s3://${backupS3Bucket})
+            verbosePrint "sync = ${result}"
+            ;;
+        esac
+
     fi
 }
 
