@@ -52,7 +52,7 @@ verbosePrint () {
 ## 5   - rsync command failed with an error
 ## 6   - DB is not ready for restore
 ## 7   - ColumnStore processes were still running
-## 8   - cloud command error gsutil or aw
+## 8   - cloud command error gsutil or awscli
 ## 255 - could not connect via passwordless ssh
 reportStatus () {
     if [ $1 != 0 ]; then
@@ -342,19 +342,19 @@ s3Restore () {
           *googleapis*)
             result=$(gsutil -m rm -r gs://${restore_s3Bucket})
             cmdRtn=$?
-            if [ "$cmdRtn" -ne "0" ]; then
+            if [ $cmdRtn != 0 ]; then
                 verbosePrint "Failed Command: gsutil -m rm -r gs://${restore_s3Bucket} returned value $cmdRtn"
                 verbosePrint "See log file for details"
                 reportStatus 8
             fi
             result=$(gsutil mb -l ${restore_s3Region} gs://${restore_s3Bucket})
-            if [ "$cmdRtn" -ne "0" ]; then
+            if [ $cmdRtn != 0 ]; then
                 verbosePrint "Failed Command: gsutil mb -l ${restore_s3Region} gs://${restore_s3Bucket} returned value $cmdRtn"
                 verbosePrint "See log file for details"
                 reportStatus 8
             fi
             result=$(gsutil -m rsync -d -r gs://${backupS3Bucket} gs://${restore_s3Bucket})
-            if [ "$cmdRtn" -ne "0" ]; then
+            if [ $cmdRtn != 0 ]; then
                 verbosePrint "Failed Command: gsutil -m rsync -d -r gs://${backupS3Bucket} gs://${restore_s3Bucket} returned value $cmdRtn"
                 verbosePrint "See log file for details"
                 reportStatus 8
@@ -362,13 +362,13 @@ s3Restore () {
             ;;
           *amazonaws*)
             result=$(aws --endpoint-url ${restore_s3Endpoint} s3 rb s3://${restore_s3Bucket} --force)
-            if [ "$cmdRtn" -ne "0" ]; then
+            if [ $cmdRtn != 0 ]; then
                 verbosePrint "Failed Command: aws --endpoint-url ${restore_s3Endpoint} s3 rb s3://${restore_s3Bucket} --force returned value $cmdRtn"
                 verbosePrint "See log file for details"
                 reportStatus 8
             fi
             result=$(aws --endpoint-url ${restore_s3Endpoint} s3 mb s3://${restore_s3Bucket} --region ${restore_s3Region})
-            if [ "$cmdRtn" -ne "0" ]; then
+            if [ $cmdRtn != 0 ]; then
                 verbosePrint "Failed Command: aws --endpoint-url ${restore_s3Endpoint} s3 mb s3://${restore_s3Bucket} --region ${restore_s3Region} returned value $cmdRtn"
                 verbosePrint "See log file for details"
                 reportStatus 8
@@ -376,7 +376,7 @@ s3Restore () {
 #            result=$(aws --endpoint-url ${restore_s3Endpoint} s3api put-public-access-block --bucket ${restore_s3Bucket} --public-access-block-configuration "BlockPublicAcls=true,IgnorePublicAcls=true,BlockPublicPolicy=true,RestrictPublicBuckets=true")
 #            verbosePrint "permissions = ${result}"
             result=$(aws --endpoint-url ${restore_s3Endpoint} s3 sync s3://${backupS3Bucket} s3://${restore_s3Bucket})
-            if [ "$cmdRtn" -ne "0" ]; then
+            if [ $cmdRtn != 0 ]; then
                 verbosePrint "Failed Command: aws --endpoint-url ${restore_s3Endpoint} s3 sync s3://${backupS3Bucket} s3://${restore_s3Bucket} returned value $cmdRtn"
                 verbosePrint "See log file for details"
                 reportStatus 8
@@ -921,7 +921,7 @@ do
     fi
 done
 if [ $restore_DBRootStorageType == "storagemanager" ]; then
-    printLog "Restoring from SnapShot of S3 Bucket: "
+    printLog "Restoring from snapshot of S3 Bucket: "
     s3Restore
 fi
 printLog "DONE"
