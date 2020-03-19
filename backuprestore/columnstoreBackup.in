@@ -107,7 +107,7 @@ helpPrint () {
     echo "  For internal storage:" 1>&3
     echo "    PM data is stored in data directories labeled pm[moduleID]dbroot[DBrootID]" 1>&3
     echo "  For storagemanager (S3):" 1>&3
-    echo "    PM metadata is store at location described by storagemanger.cnf" 1>&3
+    echo "    PM metadata is stored at location defined by metadata_path in storagemanger.cnf" 1>&3
     echo "    PM data is stored in an S3 bucket and is backed up via snapshot." 1>&3
     echo "  For all nodes with UM data:" 1>&3
     echo "    UM data is stored in directories labeled um[moduleID]" 1>&3
