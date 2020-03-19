@@ -345,19 +345,19 @@ s3Restore () {
             if [ "$cmdRtn" -ne "0" ]; then
                 verbosePrint "Failed Command: gsutil -m rm -r gs://${restore_s3Bucket} returned value $cmdRtn"
                 verbosePrint "See log file for details"
-                reportStatus 6
+                reportStatus 8
             fi
             result=$(gsutil mb -l ${restore_s3Region} gs://${restore_s3Bucket})
             if [ "$cmdRtn" -ne "0" ]; then
                 verbosePrint "Failed Command: gsutil mb -l ${restore_s3Region} gs://${restore_s3Bucket} returned value $cmdRtn"
                 verbosePrint "See log file for details"
-                reportStatus 6
+                reportStatus 8
             fi
             result=$(gsutil -m rsync -d -r gs://${backupS3Bucket} gs://${restore_s3Bucket})
             if [ "$cmdRtn" -ne "0" ]; then
                 verbosePrint "Failed Command: gsutil -m rsync -d -r gs://${backupS3Bucket} gs://${restore_s3Bucket} returned value $cmdRtn"
                 verbosePrint "See log file for details"
-                reportStatus 6
+                reportStatus 8
             fi
             ;;
           *amazonaws*)
@@ -365,13 +365,13 @@ s3Restore () {
             if [ "$cmdRtn" -ne "0" ]; then
                 verbosePrint "Failed Command: aws --endpoint-url ${restore_s3Endpoint} s3 rb s3://${restore_s3Bucket} --force returned value $cmdRtn"
                 verbosePrint "See log file for details"
-                reportStatus 6
+                reportStatus 8
             fi
             result=$(aws --endpoint-url ${restore_s3Endpoint} s3 mb s3://${restore_s3Bucket} --region ${restore_s3Region})
             if [ "$cmdRtn" -ne "0" ]; then
                 verbosePrint "Failed Command: aws --endpoint-url ${restore_s3Endpoint} s3 mb s3://${restore_s3Bucket} --region ${restore_s3Region} returned value $cmdRtn"
                 verbosePrint "See log file for details"
-                reportStatus 6
+                reportStatus 8
             fi
 #            result=$(aws --endpoint-url ${restore_s3Endpoint} s3api put-public-access-block --bucket ${restore_s3Bucket} --public-access-block-configuration "BlockPublicAcls=true,IgnorePublicAcls=true,BlockPublicPolicy=true,RestrictPublicBuckets=true")
 #            verbosePrint "permissions = ${result}"
@@ -379,7 +379,7 @@ s3Restore () {
             if [ "$cmdRtn" -ne "0" ]; then
                 verbosePrint "Failed Command: aws --endpoint-url ${restore_s3Endpoint} s3 sync s3://${backupS3Bucket} s3://${restore_s3Bucket} returned value $cmdRtn"
                 verbosePrint "See log file for details"
-                reportStatus 6
+                reportStatus 8
             fi
             ;;
         esac
