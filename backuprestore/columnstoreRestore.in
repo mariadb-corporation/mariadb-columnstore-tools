@@ -52,6 +52,7 @@ verbosePrint () {
 ## 5   - rsync command failed with an error
 ## 6   - DB is not ready for restore
 ## 7   - ColumnStore processes were still running
+## 8   - cloud command error gsutil or awscli
 ## 255 - could not connect via passwordless ssh
 reportStatus () {
     if [ $1 != 0 ]; then
@@ -112,9 +113,6 @@ helpPrint () {
     echo "-n [value]        Maximum number parallel rsync commands. (Default: 5)." 1>&3
     echo "--user=[user]     Change the user performing remote sessions. (Default: Current User)" 1>&3
     echo "" 1>&3
-    echo "--install-dir=[PATH]  Change the install directory of ColumnStore." 1>&3
-    echo "                          Default: /var/lib/columnstore" 1>&3
-    echo "" 1>&3
 }
 
 
@@ -159,16 +157,16 @@ while getopts hdn:zv-: OPT; do
                 dry-run )
                     DRY_RUN=true
                     ;;
-                install-dir=?* )  
-                    INSTALL_DIR="$LONG_OPTARG" 
-                    ;;
+#                install-dir=?* )  
+#                    INSTALL_DIR="$LONG_OPTARG" 
+#                    ;;
                 user=?* )  
                     REMOTE_USER="$LONG_OPTARG" 
                     ;;                    
-                install-dir* )  
-                    printLog "No arg for --$OPTARG option" >&2
-                    reportStatus 1
-                    ;;
+#                install-dir* )  
+#                    printLog "No arg for --$OPTARG option" >&2
+#                    reportStatus 1
+#                    ;;
                 user* )  
                     printLog "No arg for --$OPTARG option" >&2
                     reportStatus 1
@@ -329,6 +327,66 @@ fi
 }
 
 ###############################################################################
+# restore an S3 bucket from saved snapshot
+# delete existing bucket
+# recreate it and copy the files
+###############################################################################
+s3Restore () {
+
+    source $BACKUP_SERVER_LOCATION/s3Bucket.dat
+    verbosePrint "backupBucket = ${backupS3Bucket}"
+    verbosePrint "restoreBucket = ${restore_s3Bucket}"
+    
+    if [ "$DRY_RUN" = false ]; then
+        case $restore_s3Endpoint in
+          *googleapis*)
+            result=$(gsutil -m rm -r gs://${restore_s3Bucket})
+            cmdRtn=$?
+            if [ $cmdRtn != 0 ]; then
+                verbosePrint "Failed Command: gsutil -m rm -r gs://${restore_s3Bucket} returned value $cmdRtn"
+                verbosePrint "See log file for details"
+                reportStatus 8
+            fi
+            result=$(gsutil mb -l ${restore_s3Region} gs://${restore_s3Bucket})
+            if [ $cmdRtn != 0 ]; then
+                verbosePrint "Failed Command: gsutil mb -l ${restore_s3Region} gs://${restore_s3Bucket} returned value $cmdRtn"
+                verbosePrint "See log file for details"
+                reportStatus 8
+            fi
+            result=$(gsutil -m rsync -d -r gs://${backupS3Bucket} gs://${restore_s3Bucket})
+            if [ $cmdRtn != 0 ]; then
+                verbosePrint "Failed Command: gsutil -m rsync -d -r gs://${backupS3Bucket} gs://${restore_s3Bucket} returned value $cmdRtn"
+                verbosePrint "See log file for details"
+                reportStatus 8
+            fi
+            ;;
+          *amazonaws*)
+            result=$(aws --endpoint-url ${restore_s3Endpoint} s3 rb s3://${restore_s3Bucket} --force)
+            if [ $cmdRtn != 0 ]; then
+                verbosePrint "Failed Command: aws --endpoint-url ${restore_s3Endpoint} s3 rb s3://${restore_s3Bucket} --force returned value $cmdRtn"
+                verbosePrint "See log file for details"
+                reportStatus 8
+            fi
+            result=$(aws --endpoint-url ${restore_s3Endpoint} s3 mb s3://${restore_s3Bucket} --region ${restore_s3Region})
+            if [ $cmdRtn != 0 ]; then
+                verbosePrint "Failed Command: aws --endpoint-url ${restore_s3Endpoint} s3 mb s3://${restore_s3Bucket} --region ${restore_s3Region} returned value $cmdRtn"
+                verbosePrint "See log file for details"
+                reportStatus 8
+            fi
+#            result=$(aws --endpoint-url ${restore_s3Endpoint} s3api put-public-access-block --bucket ${restore_s3Bucket} --public-access-block-configuration "BlockPublicAcls=true,IgnorePublicAcls=true,BlockPublicPolicy=true,RestrictPublicBuckets=true")
+#            verbosePrint "permissions = ${result}"
+            result=$(aws --endpoint-url ${restore_s3Endpoint} s3 sync s3://${backupS3Bucket} s3://${restore_s3Bucket})
+            if [ $cmdRtn != 0 ]; then
+                verbosePrint "Failed Command: aws --endpoint-url ${restore_s3Endpoint} s3 sync s3://${backupS3Bucket} s3://${restore_s3Bucket} returned value $cmdRtn"
+                verbosePrint "See log file for details"
+                reportStatus 8
+            fi
+            ;;
+        esac
+    fi
+}
+
+###############################################################################
 # Get the system info from provided PM1
 ###############################################################################
 getSystemInfo () {
@@ -366,10 +424,31 @@ restore_DBRootStorageType=$(xmllint --xpath 'string(//DBRootStorageType)' $resto
 restore_umModuleCount=$(xmllint --xpath "string(//ModuleCount2)" $restoreServerConfigeDir/Columnstore.xml)
 restore_pmModuleCount=$(xmllint --xpath "string(//ModuleCount3)" $restoreServerConfigeDir/Columnstore.xml)
 restore_DBRootCount=$(xmllint --xpath 'string(//DBRootCount)' $restoreServerConfigeDir/Columnstore.xml)
-for (( dbRootID=1; dbRootID<=$restore_DBRootCount; dbRootID++ ))
-do
-    restore_DBRoot[$dbRootID]=$(xmllint --xpath "string(//DBRoot$dbRootID)" $restoreServerConfigeDir/Columnstore.xml)
-done
+
+if [ $restore_DBRootStorageType == "storagemanager" ]; then
+    executeRsync false --link-dest=./backup.1 $REMOTE_USER@$PM1:@ETCDIR@/storagemanager.cnf $restoreServerConfigeDir
+
+    # get the storagemanager metadirectory
+    restore_metaDataPath=$(awk '/^metadata_path/{print $3}' $restoreServerConfigeDir/storagemanager.cnf)
+    # get the storagemanager s3 endpoint region and bucket
+    restore_s3Endpoint=$(awk '/^endpoint/{print $3}' $restoreServerConfigeDir/storagemanager.cnf)
+    restore_s3Region=$(awk '/^region/{print $3}' $restoreServerConfigeDir/storagemanager.cnf)
+    restore_s3Bucket=$(awk '/^bucket/{print $3}' $restoreServerConfigeDir/storagemanager.cnf)
+    if [ $REMOTE_USER == "root" ]; then
+        restore_metaDirectory=${restore_metaDataPath/'${HOME}'//$REMOTE_USER}
+    else
+        restore_metaDirectory=${restore_metaDataPath/'${HOME}'//home/$REMOTE_USER}
+    fi
+    if [ -z $restore_s3Endpoint]; then
+        restore_s3Endpoint="s3."${restore_s3Region}".amazonaws.com"
+    fi
+    restore_s3Endpoint="https://"${restore_s3Endpoint}
+else
+    for (( dbRootID=1; dbRootID<=$restore_DBRootCount; dbRootID++ ))
+    do
+        restore_DBRoot[$dbRootID]=$(xmllint --xpath "string(//DBRoot$dbRootID)" $restoreServerConfigeDir/Columnstore.xml)
+    done
+fi
 
 if [ $restore_singleServerInstall == "n" ]; then
     detectError=false
@@ -429,7 +508,7 @@ if [ $restore_singleServerInstall == "n" ]; then
         printLog "Check that ssh and passwordless login are available." >&2
         reportStatus 255 
     fi
-    
+        
 elif [ $restore_singleServerInstall == "y" ]; then
     
     for (( moduleID=1; moduleID<=$restore_pmModuleCount; moduleID++ ))
@@ -479,6 +558,30 @@ if [ "$errorDetected" = true ]; then
     reportStatus 4
 fi
 
+if [ $backup_DBRootStorageType == "storagemanager" ]; then
+    executeRsync false --link-dest=./backup.1 $REMOTE_USER@$PM1:@ETCDIR@/storagemanager.cnf $BACKUP_SERVER_LOCATION
+
+    # get the storagemanager s3 endpoint region and bucket
+    backup_s3Endpoint=$(awk '/^endpoint/{print $3}' $BACKUP_SERVER_LOCATION/storagemanager.cnf)
+    backup_s3Region=$(awk '/^region/{print $3}' $BACKUP_SERVER_LOCATION/storagemanager.cnf)
+    backup_s3Bucket=$(awk '/^bucket/{print $3}' $BACKUP_SERVER_LOCATION/storagemanager.cnf)
+
+    if [ ! -e $BACKUP_SERVER_LOCATION/s3Bucket.dat ]; then
+        printLog "ERROR: cannot find s3Bucket.dat" >&2
+        detectError=true
+    fi
+    if [ -z $backup_s3Endpoint]; then
+        backup_s3Endpoint="s3."${backup_s3Region}".amazonaws.com"
+    fi
+    backup_s3Endpoint="https://"${backup_s3Endpoint}
+    if [ $backup_s3Endpoint != $restore_s3Endpoint ]; then
+        printLog "ERROR: Different endpoint detected for S3:" >&2
+        printLog "Restore S3 Endpoint: $restore_s3Endpoint" >&2
+        printLog "Backup  S3 Endpoint: $backup_s3Endpoint" >&2
+        errorDetected=true
+    fi
+fi
+
 if [ $backup_singleServerInstall == "n" ]; then
 
     for (( moduleID=1; moduleID<=$backup_umModuleCount; moduleID++ ))
@@ -520,7 +623,6 @@ if [ $backup_singleServerInstall == "n" ]; then
             backup_umModuleHostname[$moduleID]=${backup_pmModuleHostname[$moduleID]}     
         done
     fi
-    
 elif [ $backup_singleServerInstall == "y" ]; then
     
     for (( moduleID=1; moduleID<=$backup_pmModuleCount; moduleID++ ))
@@ -550,10 +652,12 @@ elif [ $backup_pmModuleCount != $restore_pmModuleCount ]; then
     printLog "Backup  PM Count: $backup_pmModuleCount" >&2
     errorDetected=true
 elif [ $backup_DBRootCount != $restore_DBRootCount ]; then
-    printLog "ERROR: DBRoot Count difference detected:" >&2
-    printLog "Restore DBRoot Count: $restore_DBRootCount" >&2
-    printLog "Backup  DBRoot Count: $backup_DBRootCount" >&2
-    errorDetected=true
+    if [ $backup_DBRootStorageType != "storagemanager" ]; then
+        printLog "ERROR: DBRoot Count difference detected:" >&2
+        printLog "Restore DBRoot Count: $restore_DBRootCount" >&2
+        printLog "Backup  DBRoot Count: $backup_DBRootCount" >&2
+        errorDetected=true
+    fi
 else
     for (( moduleID=1; moduleID<=$backup_pmModuleCount; moduleID++ ))
     do
@@ -589,14 +693,26 @@ totalBackupSize=0
         for (( moduleDBRootID=1; moduleDBRootID<=${restore_pmModuleDBRootCount[$moduleID]}; moduleDBRootID++ ))
         do
             thisRestoreDBrootID=$(xmllint --xpath "string(//ModuleDBRootID$moduleID-$moduleDBRootID-3)" $restoreServerConfigeDir/Columnstore.xml)
-            thisRestoreSpaceFree=$(ssh $REMOTE_USER@${restore_pmModuleIP[$moduleID]} df -B1 ${restore_DBRoot[$thisRestoreDBrootID]} | awk 'NR==2 {print $4}')
-            commandReturn=$(ssh $REMOTE_USER@${restore_pmModuleIP[$moduleID]} du -s -b ${restore_DBRoot[$thisRestoreDBrootID]})
-            returnValues=($commandReturn)
-            if [ ${returnValues[1]} == ${restore_DBRoot[$thisRestoreDBrootID]} ]; then
-                thisRestoreSpaceUsed=${returnValues[0]}
+            if [ $restore_DBRootStorageType == "storagemanager" ]; then
+                thisRestoreSpaceFree=$(ssh $REMOTE_USER@${restore_pmModuleIP[$moduleID]} df -B1 ${restore_metaDirectory} | awk 'NR==2 {print $4}')
+                commandReturn=$(ssh $REMOTE_USER@${restore_pmModuleIP[$moduleID]} du -s -b ${restore_metaDirectory})
+                returnValues=($commandReturn)
+                if [ ${returnValues[1]} == ${restore_metaDirectory} ]; then
+                    thisRestoreSpaceUsed=${returnValues[0]}
+                else
+                    printLog "failed return from command: $commandReturn" >&2
+                    reportStatus 3
+                fi
             else
-                printLog "failed return from command: $commandReturn" >&2
-                reportStatus 3
+                thisRestoreSpaceFree=$(ssh $REMOTE_USER@${restore_pmModuleIP[$moduleID]} df -B1 ${restore_DBRoot[$thisRestoreDBrootID]} | awk 'NR==2 {print $4}')
+                commandReturn=$(ssh $REMOTE_USER@${restore_pmModuleIP[$moduleID]} du -s -b ${restore_DBRoot[$thisRestoreDBrootID]})
+                returnValues=($commandReturn)
+                if [ ${returnValues[1]} == ${restore_DBRoot[$thisRestoreDBrootID]} ]; then
+                    thisRestoreSpaceUsed=${returnValues[0]}
+                else
+                    printLog "failed return from command: $commandReturn" >&2
+                    reportStatus 3
+                fi
             fi
             thisRestoreSpaceAvail=$(( $thisRestoreSpaceFree + $thisRestoreSpaceUsed ))
             moduleDBRootBackupDir="pm""$moduleID""dbroot""$moduleDBRootID"
@@ -750,7 +866,7 @@ printLog "Config Restore..."
 backupCnfDir="cnf"
 
 if [ $BACKUP_SERVER_LOCATION/$backupCnfDir ]; then
-    executeRsync $DRY_RUN "" $BACKUP_SERVER_LOCATION/$backupCnfDir $REMOTE_USER@$PM1:@MYCNFDIR@/
+    executeRsync $DRY_RUN "" $BACKUP_SERVER_LOCATION/$backupCnfDir/ $REMOTE_USER@$PM1:@MYCNFDIR@/
 fi
 
 printLog "DONE"
@@ -775,7 +891,11 @@ do
         pmBackupDir="pm""$moduleID""dbroot""$moduleDBRootID"
         if [ -e $BACKUP_SERVER_LOCATION/$pmBackupDir ]; then
             printLog "Restoring $pmBackupDir"
-            executeRsyncBackground $DRY_RUN /$dir/$pmBackupDir "" $BACKUP_SERVER_LOCATION/$pmBackupDir/data?*/ $REMOTE_USER@${restore_pmModuleIP[$moduleID]}:${restore_DBRoot[$thisRestoreDBrootID]}
+            if [ $restore_DBRootStorageType == "storagemanager" ]; then
+                executeRsyncBackground $DRY_RUN /$dir/$pmBackupDir "" $BACKUP_SERVER_LOCATION/$pmBackupDir/metadata/ $REMOTE_USER@${restore_pmModuleIP[$moduleID]}:${restore_metaDirectory}/
+            else
+                executeRsyncBackground $DRY_RUN /$dir/$pmBackupDir "" $BACKUP_SERVER_LOCATION/$pmBackupDir/data?*/ $REMOTE_USER@${restore_pmModuleIP[$moduleID]}:${restore_DBRoot[$thisRestoreDBrootID]}
+            fi
             ((activeRestores++))
             if [ $activeRestores -ge $NUMBER_CONCURRENT ]; then
                 waitRsyncBackground ${pmModuleBackupSize[$moduleID]} $moduleID $dir $activeRestores
@@ -799,7 +919,11 @@ do
             executeRsync $DRY_RUN "" $BACKUP_SERVER_LOCATION/$pmBackupDirDB/db/ $REMOTE_USER@${restore_pmModuleIP[$moduleID]}:@MARIADIR@
         fi
     fi
-done    
+done
+if [ $restore_DBRootStorageType == "storagemanager" ]; then
+    printLog "Restoring from snapshot of S3 Bucket: "
+    s3Restore
+fi
 printLog "DONE"
 }
 
@@ -814,7 +938,7 @@ do
     umBackupDir="um""$moduleID"
     if [ -e $BACKUP_SERVER_LOCATION/$umBackupDir ]; then
         printLog "Restoring $umBackupDir..."
-        executeRsync $DRY_RUN "" $BACKUP_SERVER_LOCATION/$umBackupDir/db/ $REMOTE_USER@${restore_umModuleIP[$moduleID]}:@MARIADIR@
+        executeRsync $DRY_RUN "" $BACKUP_SERVER_LOCATION/$umBackupDir/ $REMOTE_USER@${restore_umModuleIP[$moduleID]}:@MARIADIR@/
     fi
 printLog "DONE"
 done
@@ -822,7 +946,7 @@ done
 
 checkSystemState () {
 errors=false
-systemDB="information_schema calpontsys columnstore_info infinidb_querystats infinidb_vtable performance_schema mysql test"
+systemDB="information_schema calpontsys columnstore_info infinidb_querystats performance_schema mysql"
 for db in $systemDB
 do
     excludeSystemDB=$excludeSystemDB" -not -name $db"
@@ -842,17 +966,24 @@ for (( moduleID=1; moduleID<=$restore_pmModuleCount; moduleID++ ))
 do
     for (( moduleDBRootID=1; moduleDBRootID<=${restore_pmModuleDBRootCount[$moduleID]}; moduleDBRootID++ ))
     do
-        thisRestoreDBrootID=$(xmllint --xpath "string(//ModuleDBRootID$moduleID-$moduleDBRootID-3)" $restoreServerConfigeDir/Columnstore.xml)
-        if (ssh $REMOTE_USER@${restore_pmModuleIP[$moduleID]} "[ -d ${restore_DBRoot[$thisRestoreDBrootID]}/000.dir ]"); then
-            printLog "ERROR: PM$moduleID: data directory found -- ${restore_DBRoot[$thisRestoreDBrootID]}/000.dir"
-            errors=true
+        if [ $restore_DBRootStorageType == "storagemanager" ]; then
+            if (ssh $REMOTE_USER@${restore_pmModuleIP[$moduleID]} '[ ! -z "$(ls -A ${restore_metaDirectory})"]'); then
+                printLog "ERROR: PM$moduleID: metadata directory not empty -- ${restore_metaDirectory}"
+                errors=true
+            fi
+        else
+            thisRestoreDBrootID=$(xmllint --xpath "string(//ModuleDBRootID$moduleID-$moduleDBRootID-3)" $restoreServerConfigeDir/Columnstore.xml)
+            if (ssh $REMOTE_USER@${restore_pmModuleIP[$moduleID]} "[ -d ${restore_DBRoot[$thisRestoreDBrootID]}/000.dir ]"); then
+                printLog "ERROR: PM$moduleID: data directory found -- ${restore_DBRoot[$thisRestoreDBrootID]}/000.dir"
+                errors=true
+            fi
+            dbrmFiles=$(ssh $REMOTE_USER@${restore_pmModuleIP[$moduleID]} "if [ -e ${restore_DBRoot[$thisRestoreDBrootID]}/systemFiles/dbrm/ ]; then ls -A ${restore_DBRoot[$thisRestoreDBrootID]}/systemFiles/dbrm/; fi;")
+            for file in $dbrmFiles
+            do
+                printLog "ERROR: PM$moduleID: dbrm directory file found -- $file" >&2
+                errors=true
+            done
         fi
-        dbrmFiles=$(ssh $REMOTE_USER@${restore_pmModuleIP[$moduleID]} "if [ -e ${restore_DBRoot[$thisRestoreDBrootID]}/systemFiles/dbrm/ ]; then ls -A ${restore_DBRoot[$thisRestoreDBrootID]}/systemFiles/dbrm/; fi;")
-        for file in $dbrmFiles
-        do
-            printLog "ERROR: PM$moduleID: dbrm directory file found -- $file" >&2
-            errors=true
-        done
     done
 done
 
@@ -935,10 +1066,14 @@ do
 done
 
 verbosePrint "DBRootCount: $restore_DBRootCount"
-for (( dbRootID=1; dbRootID<=$restore_DBRootCount; dbRootID++ ))
-do
-    verbosePrint "DBRoot$dbRootID: ${restore_DBRoot[$dbRootID]}"
-done
+if [ $restore_DBRootStorageType == "storagemanager" ]; then
+    verbosePrint "Metadata Location: ${restore_metaDirectory}"
+else
+    for (( dbRootID=1; dbRootID<=$restore_DBRootCount; dbRootID++ ))
+    do
+        verbosePrint "DBRoot$dbRootID: ${restore_DBRoot[$dbRootID]}"
+    done
+fi
 
 verbosePrint ""
 verbosePrint "Backup System:"
