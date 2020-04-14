@@ -27,14 +27,14 @@ MESSAGE(STATUS "Running cmake version ${CMAKE_VERSION}")
 
 option(BACKUPRESTORE "Build the backup restore tool" ON)
 option(MONITORING "Build the monitoring tool" ON)
-option(REMOTE_CPIMPORT "Build the mcsimport tool" ON)
-option(TEST_RUNNER "Build the test suite" OFF)
+#option(REMOTE_CPIMPORT "Build the mcsimport tool" ON)
+#option(TEST_RUNNER "Build the test suite" OFF)
 option(DEB "Build a DEB" OFF)
 option(RPM "Build an RPM" OFF)
 
-if (TEST_RUNNER)
-  enable_testing()
-endif (TEST_RUNNER)
+#if (TEST_RUNNER)
+#  enable_testing()
+#endif (TEST_RUNNER)
 
 # Generate "something" to trigger cmake rerun when VERSION changes
 CONFIGURE_FILE(
@@ -88,7 +88,7 @@ CONFIGURE_FILE(${CMAKE_CURRENT_SOURCE_DIR}/gitversionTools.in ${CMAKE_CURRENT_BI
 # Get columnstore version
 GET_COLUMNSTORE_VERSION()
 
-SET(CPACK_PACKAGE_NAME "mariadb-columnstore-tools")
+SET(CPACK_PACKAGE_NAME "mariadb-columnstore-backup")
 SET(ENGINE_ARCH "amd64")
 
 SET(CPACK_PACKAGE_FILE_NAME "${CPACK_PACKAGE_NAME}-${PACKAGE_VERSION}-${PACKAGE_RELEASE}")
@@ -129,9 +129,9 @@ IF(UNIX)
     INSTALL(FILES ${CMAKE_CURRENT_BINARY_DIR}/gitversionTools DESTINATION ${SUPPORT_DIR}/tools )
 ENDIF(UNIX)
 
-IF(REMOTE_CPIMPORT)
-  add_subdirectory(mcsimport)
-ENDIF(REMOTE_CPIMPORT)
+#IF(REMOTE_CPIMPORT)
+#  add_subdirectory(mcsimport)
+#ENDIF(REMOTE_CPIMPORT)
 
 IF(DEB)
 
@@ -158,12 +158,12 @@ IF(DEB)
 
   SET(CPACK_DEBIAN_PACKAGE_DESCRIPTION ${CPACK_PACKAGE_DESCRIPTION_SUMMARY})
 
-  SET(CPACK_DEBIAN_PACKAGE_PROVIDES "mariadb-columnstore-tools")
-  IF(REMOTE_CPIMPORT)
-    SET(CPACK_DEBIAN_PACKAGE_DEPENDS "libxml2 , rsync , mariadb-columnstore-api-cpp ( >= ${MAJOR_VERSION}.${MINOR_VERSION} )")
-  ELSE(REMOTE_CPIMPORT)
+  SET(CPACK_DEBIAN_PACKAGE_PROVIDES "mariadb-columnstore-backup")
+#  IF(REMOTE_CPIMPORT)
+#    SET(CPACK_DEBIAN_PACKAGE_DEPENDS "libxml2 , rsync , mariadb-columnstore-api-cpp ( >= ${MAJOR_VERSION}.${MINOR_VERSION} )")
+#  ELSE(REMOTE_CPIMPORT)
     SET(CPACK_DEBIAN_PACKAGE_DEPENDS "libxml2 , rsync")
-  ENDIF(REMOTE_CPIMPORT)
+#  ENDIF(REMOTE_CPIMPORT)
   SET(CPACK_DEBIAN_PACKAGE_SHLIBDEPS ON)
 
   INCLUDE (CPack)
@@ -201,12 +201,12 @@ IF(RPM)
         ENDFOREACH()
     ENDMACRO(SETA)
 
-    SETA(CPACK_RPM_PACKAGE_PROVIDES "mariadb-columnstore-tools")
-    IF(REMOTE_CPIMPORT)
-        SETA(CPACK_RPM_PACKAGE_REQUIRES "libxml2" "rsync" "mariadb-columnstore-api-cpp >= ${MAJOR_VERSION}.${MINOR_VERSION}")
-    ELSE(REMOTE_CPIMPORT)
+    SETA(CPACK_RPM_PACKAGE_PROVIDES "mariadb-columnstore-backup")
+#    IF(REMOTE_CPIMPORT)
+#        SETA(CPACK_RPM_PACKAGE_REQUIRES "libxml2" "rsync" "mariadb-columnstore-api-cpp >= ${MAJOR_VERSION}.${MINOR_VERSION}")
+#    ELSE(REMOTE_CPIMPORT)
         SETA(CPACK_RPM_PACKAGE_REQUIRES "libxml2" "rsync")
-    ENDIF(REMOTE_CPIMPORT)
+#    ENDIF(REMOTE_CPIMPORT)
 
 
     SET(CPACK_RPM_SPEC_MORE_DEFINE "${CPACK_RPM_SPEC_MORE_DEFINE}
@@ -298,17 +298,17 @@ if(WIN32)
     ENDIF(REMOTE_CPIMPORT)
 endif(WIN32)
 
-if (TEST_RUNNER)
-  include(CTest)
-endif (TEST_RUNNER)
+#if (TEST_RUNNER)
+#  include(CTest)
+#endif (TEST_RUNNER)
 
 MESSAGE(STATUS "-----------------------------------------------")
 MESSAGE(STATUS "CMAKE_INSTALL_PREFIX = ${CMAKE_INSTALL_PREFIX}")
 MESSAGE(STATUS "CMAKE_BUILD_TYPE = ${CMAKE_BUILD_TYPE}")
-MESSAGE(STATUS "TEST_RUNNER = ${TEST_RUNNER}")
+#MESSAGE(STATUS "TEST_RUNNER = ${TEST_RUNNER}")
 MESSAGE(STATUS "BACKUPRESTORE = ${BACKUPRESTORE}")
-MESSAGE(STATUS "MONITORING = ${MONITORING}")
-MESSAGE(STATUS "REMOTE_CPIMPORT = ${REMOTE_CPIMPORT}")
+#MESSAGE(STATUS "MONITORING = ${MONITORING}")
+#MESSAGE(STATUS "REMOTE_CPIMPORT = ${REMOTE_CPIMPORT}")
 MESSAGE(STATUS "RPM = ${RPM}")
 MESSAGE(STATUS "DEB = ${DEB}")
 MESSAGE(STATUS "Change a values with: cmake -D<Variable>=<Value>")
