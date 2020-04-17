@@ -1,1 +1,0 @@
-CREATE TABLE IF NOT EXISTS mcsimport_test_seperator_map_impl (id bigint unsigned, a int, b int, c int) engine=columnstore

@@ -1,1 +1,0 @@
-CREATE TABLE IF NOT EXISTS mcsimport_test_load_2 (id bigint unsigned, c1 bigint, c2 bigint) engine=columnstore
