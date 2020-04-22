@@ -27,10 +27,14 @@ def executeTestSuite():
     user = "root"
     global host
     host = "localhost"
+    global port
+    port = 3306
     if os.environ.get("MCSAPI_CS_TEST_IP") is not None:
         host=os.environ.get("MCSAPI_CS_TEST_IP")
     if os.environ.get("MCSAPI_CS_TEST_USER") is not None:
         user=os.environ.get("MCSAPI_CS_TEST_USER")
+    if os.environ.get("MCSAPI_CS_TEST_PORT") is not None:
+        port=int(os.environ.get("MCSAPI_CS_TEST_PORT"))
     global password
     password = os.environ.get("MCSAPI_CS_TEST_PASSWORD")
 
@@ -170,7 +174,7 @@ def loadTestConfig(test_directory):
 def prepareColumnstoreTable(file, table):
     error = False
     try:
-        conn = mariadb.connect(user=user, password=password, host=host, database=DB_NAME)
+        conn = mariadb.connect(user=user, password=password, host=host, database=DB_NAME, port=port)
         cursor = conn.cursor();
         cursor.execute("DROP TABLE IF EXISTS %s" %(table,))
         with open(file) as f:
@@ -254,7 +258,7 @@ def executeMcsimport(test_directory,testConfig):
 def validateInjection(test_directory,table,validationCoverage):
     error = False
     try:
-        conn = mariadb.connect(user=user, password=password, host=host, database=DB_NAME)
+        conn = mariadb.connect(user=user, password=password, host=host, database=DB_NAME, port=port)
         cursor = conn.cursor();
         # validate that the number of rows of expected.csv and target table match
         cursor.execute("SELECT COUNT(*) AS cnt FROM %s" % (table,))
@@ -302,7 +306,7 @@ def validateInjection(test_directory,table,validationCoverage):
 def cleanUpColumnstoreTable(table):
     error = False
     try:
-        conn = mariadb.connect(user=user, password=password, host=host, database=DB_NAME)
+        conn = mariadb.connect(user=user, password=password, host=host, database=DB_NAME, port=port)
         cursor = conn.cursor();
         cursor.execute("DROP TABLE IF EXISTS %s" %(table,))
     except mariadb.Error as err:
