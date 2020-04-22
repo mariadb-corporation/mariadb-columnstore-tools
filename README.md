@@ -21,14 +21,6 @@ The options are as follows:
 | ``RPM`` | ``OFF`` | Build a RPM (and the OS name for the package) |
 | ``DEB`` | ``OFF`` | Build a DEB (and the OS name for the package) |
 
-### CentOS 6
-
-```bash
-mkdir build && cd build
-cmake .. -DRPM=centos6
-make package
-```
-
 ### CentOS 7
 ```bash
 mkdir build && cd build
