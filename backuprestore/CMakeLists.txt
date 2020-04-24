@@ -1,6 +1,6 @@
 IF(UNIX)
     configure_file("${CMAKE_CURRENT_SOURCE_DIR}/columnstoreRestore.in" "${CMAKE_CURRENT_SOURCE_DIR}/columnstoreRestore" @ONLY)
     configure_file("${CMAKE_CURRENT_SOURCE_DIR}/columnstoreBackup.in" "${CMAKE_CURRENT_SOURCE_DIR}/columnstoreBackup" @ONLY)
-    INSTALL(FILES README.md DESTINATION ${SUPPORT_DIR}/backuprestore )
+    INSTALL(FILES README.md DESTINATION ${SUPPORTDIR}/backuprestore )
     INSTALL(PROGRAMS columnstoreRestore columnstoreBackup DESTINATION ${BINDIR} )
 ENDIF(UNIX)

@@ -25,16 +25,8 @@ ENDIF(UNIX)
 
 MESSAGE(STATUS "Running cmake version ${CMAKE_VERSION}")
 
-option(BACKUPRESTORE "Build the backup restore tool" ON)
-option(MONITORING "Build the monitoring tool" ON)
-option(REMOTE_CPIMPORT "Build the mcsimport tool" ON)
-option(TEST_RUNNER "Build the test suite" OFF)
 option(DEB "Build a DEB" OFF)
 option(RPM "Build an RPM" OFF)
-
-if (TEST_RUNNER)
-  enable_testing()
-endif (TEST_RUNNER)
 
 # Generate "something" to trigger cmake rerun when VERSION changes
 CONFIGURE_FILE(
@@ -83,12 +75,12 @@ exec_program("git"
     ARGS "describe --match=NeVeRmAtCh --always --dirty"
     OUTPUT_VARIABLE GIT_VERSION)
 
-CONFIGURE_FILE(${CMAKE_CURRENT_SOURCE_DIR}/gitversionTools.in ${CMAKE_CURRENT_BINARY_DIR}/gitversionTools IMMEDIATE)
+CONFIGURE_FILE(${CMAKE_CURRENT_SOURCE_DIR}/gitversion.in ${CMAKE_CURRENT_BINARY_DIR}/gitversion IMMEDIATE)
 
 # Get columnstore version
 GET_COLUMNSTORE_VERSION()
 
-SET(CPACK_PACKAGE_NAME "mariadb-columnstore-tools")
+SET(CPACK_PACKAGE_NAME "MariaDB-columnstore-backup")
 SET(ENGINE_ARCH "amd64")
 
 SET(CPACK_PACKAGE_FILE_NAME "${CPACK_PACKAGE_NAME}-${PACKAGE_VERSION}-${PACKAGE_RELEASE}")
@@ -120,22 +112,12 @@ ELSE()
     SET (SUPPORTDIR "/usr/local/share/columnstore")
 ENDIF()
 
-IF(BACKUPRESTORE)
-  ADD_SUBDIRECTORY(backuprestore)
-ENDIF(BACKUPRESTORE)
-
-IF(MONITORING)
-  ADD_SUBDIRECTORY(monitoring)
-ENDIF(MONITORING)
+ADD_SUBDIRECTORY(backuprestore)
 
 IF(UNIX)
-    INSTALL(FILES COPYRIGHT.txt LICENSE.txt README.md VERSION DESTINATION ${SUPPORT_DIR}/tools )
-    INSTALL(FILES ${CMAKE_CURRENT_BINARY_DIR}/gitversionTools DESTINATION ${SUPPORT_DIR}/tools )
+    INSTALL(FILES COPYRIGHT.txt LICENSE.txt README.md VERSION DESTINATION ${SUPPORTDIR}/backuprestore )
+    INSTALL(FILES ${CMAKE_CURRENT_BINARY_DIR}/gitversion DESTINATION ${SUPPORTDIR}/backuprestore )
 ENDIF(UNIX)
-
-IF(REMOTE_CPIMPORT)
-  add_subdirectory(mcsimport)
-ENDIF(REMOTE_CPIMPORT)
 
 IF(DEB)
 
@@ -162,12 +144,8 @@ IF(DEB)
 
   SET(CPACK_DEBIAN_PACKAGE_DESCRIPTION ${CPACK_PACKAGE_DESCRIPTION_SUMMARY})
 
-  SET(CPACK_DEBIAN_PACKAGE_PROVIDES "mariadb-columnstore-tools")
-  IF(REMOTE_CPIMPORT)
-    SET(CPACK_DEBIAN_PACKAGE_DEPENDS "libxml2 , rsync , mariadb-columnstore-api-cpp ( >= ${MAJOR_VERSION}.${MINOR_VERSION} )")
-  ELSE(REMOTE_CPIMPORT)
-    SET(CPACK_DEBIAN_PACKAGE_DEPENDS "libxml2 , rsync")
-  ENDIF(REMOTE_CPIMPORT)
+  SET(CPACK_DEBIAN_PACKAGE_PROVIDES "MariaDB-columnstore-backup")
+  SET(CPACK_DEBIAN_PACKAGE_DEPENDS "rsync")
   SET(CPACK_DEBIAN_PACKAGE_SHLIBDEPS ON)
 
   INCLUDE (CPack)
@@ -205,13 +183,8 @@ IF(RPM)
         ENDFOREACH()
     ENDMACRO(SETA)
 
-    SETA(CPACK_RPM_PACKAGE_PROVIDES "mariadb-columnstore-tools")
-    IF(REMOTE_CPIMPORT)
-        SETA(CPACK_RPM_PACKAGE_REQUIRES "libxml2" "rsync" "mariadb-columnstore-api-cpp >= ${MAJOR_VERSION}.${MINOR_VERSION}")
-    ELSE(REMOTE_CPIMPORT)
-        SETA(CPACK_RPM_PACKAGE_REQUIRES "libxml2" "rsync")
-    ENDIF(REMOTE_CPIMPORT)
-
+    SETA(CPACK_RPM_PACKAGE_PROVIDES "MariaDB-columnstore-backup")
+    SETA(CPACK_RPM_PACKAGE_REQUIRES "rsync")
 
     SET(CPACK_RPM_SPEC_MORE_DEFINE "${CPACK_RPM_SPEC_MORE_DEFINE}
         %define ignore \#
@@ -228,94 +201,11 @@ IF(RPM)
 
 ENDIF()
 
-if(WIN32)
-      IF(REMOTE_CPIMPORT)
-        # On Windows find the Microsoft Visual Studio 2017 C++ Redistributable merge module (x64) that is packaged with mcsapi
-          
-        # Macro to get the subdirectories of a given directory
-        MACRO(SUBDIRLIST result curdir)
-            FILE(GLOB children RELATIVE ${curdir} ${curdir}/*)
-            SET(dirlist "")
-            FOREACH(child ${children})
-              IF(IS_DIRECTORY ${curdir}/${child})
-                LIST(APPEND dirlist ${child})
-              ENDIF()
-            ENDFOREACH()
-           SET(${result} ${dirlist})
-        ENDMACRO()
-  
-        # Build up potential merge module paths
-        SET(VISUAL_STUDIO_PATHS)
-        LIST(APPEND VISUAL_STUDIO_PATHS "$ENV{ProgramFiles}/Microsoft Visual Studio/2017/Community/VC/Redist/MSVC")
-        LIST(APPEND VISUAL_STUDIO_PATHS "$ENV{ProgramFiles} (x86)/Microsoft Visual Studio/2017/Community/VC/Redist/MSVC")
-        LIST(APPEND VISUAL_STUDIO_PATHS "$ENV{ProgramFiles}/Microsoft Visual Studio/2017/Enterprise/VC/Redist/MSVC")
-        LIST(APPEND VISUAL_STUDIO_PATHS "$ENV{ProgramFiles} (x86)/Microsoft Visual Studio/2017/Enterprise/VC/Redist/MSVC")
-        LIST(APPEND VISUAL_STUDIO_PATHS "$ENV{ProgramFiles}/Microsoft Visual Studio/2017/Professional/VC/Redist/MSVC")
-        LIST(APPEND VISUAL_STUDIO_PATHS "$ENV{ProgramFiles} (x86)/Microsoft Visual Studio/2017/Professional/VC/Redist/MSVC")
-        
-        SET(MSM_PATHS)
-        FOREACH(VISUAL_STUDIO_PATH ${VISUAL_STUDIO_PATHS})
-          file(TO_CMAKE_PATH ${VISUAL_STUDIO_PATH} VISUAL_STUDIO_PATH_CONV)
-          SUBDIRLIST(SUB_DIRS ${VISUAL_STUDIO_PATH_CONV})
-          FOREACH(SUB_DIR ${SUB_DIRS})
-              LIST(APPEND MSM_PATHS "${VISUAL_STUDIO_PATH}/${SUB_DIR}/MergeModules")
-          ENDFOREACH()
-        ENDFOREACH()
-      
-        # Try to find the merge module
-        find_file(
-          VS_2017_REDIST_MSM
-          NAMES Microsoft_VC141_CRT_x64.msm Microsoft_VC140_CRT_x64.msm
-          HINTS $ENV{MSM_DIRECTORY}
-          PATHS ${MSM_PATHS}
-        )
-        if (${VS_2017_REDIST_MSM} STREQUAL "VS_2017_REDIST_MSM-NOTFOUND")
-          MESSAGE(FATAL_ERROR "Could not find a usable Visual Studio 2015/17 C++ Redistributable merge module Microsoft_VC141_CRT_x64.msm!\nYou can hint cmake by setting the environment variable MSM_DIRECTORY.")
-        ENDIF()
-        MESSAGE(STATUS "Found Visual Studio 2015/17 C++ Redistributable merge module: ${VS_2017_REDIST_MSM}")
-        
-        SET(CPACK_GENERATOR "WIX")
-        SET(CPACK_RESOURCE_FILE_LICENSE "${CMAKE_CURRENT_SOURCE_DIR}/LICENSE.txt")
-        SET(CPACK_WIX_UI_BANNER "${CMAKE_CURRENT_SOURCE_DIR}/resources/WixUIBannerBmp.jpg")
-        SET(CPACK_WIX_UI_DIALOG "${CMAKE_CURRENT_SOURCE_DIR}/resources/WixUIDialogBmp.jpg")
-        SET(CPACK_WIX_PRODUCT_ICON "${CMAKE_CURRENT_SOURCE_DIR}/resources/mariadb.ico")
-        SET(WIX_PATCH_FILES)
-        configure_file(
-            "${CMAKE_CURRENT_SOURCE_DIR}/cmake/cpack_windows/redist.patch.in"
-            "${CMAKE_CURRENT_SOURCE_DIR}/cmake/cpack_windows/redist.patch"
-            IMMEDIATE @ONLY)
-        LIST(APPEND WIX_PATCH_FILES "${CMAKE_CURRENT_SOURCE_DIR}/cmake/cpack_windows/redist.patch")
-        SET(CPACK_WIX_PATCH_FILE ${WIX_PATCH_FILES})
-        SET(CPACK_PACKAGE_NAME "MariaDB ColumnStore mcsimport")
-        set(CPACK_PACKAGE_DESCRIPTION_SUMMARY "MariaDB ColumnStore mcsimport")
-        set(CPACK_PACKAGE_SUMMARY "MariaDB ColumnStore: A Scale out Columnar storage engine for MariaDB")
-        set(CPACK_PACKAGE_VENDOR "MariaDB Corporation Ab")
-        SET(CPACK_PACKAGE_CONTACT "MariaDB Corporation Ab")
-        SET(ENGINE_ARCH "x64")
-        SET(CPACK_PACKAGE_VERSION ${PACKAGE_VERSION})
-        set(CPACK_PACKAGE_VERSION_RELEASE ${PACKAGE_RELEASE})
-        set(CPACK_PACKAGE_FILE_NAME "${CPACK_PACKAGE_NAME}-${CPACK_PACKAGE_VERSION}-${CPACK_PACKAGE_VERSION_RELEASE}-${ENGINE_ARCH}")
-        set(CPACK_WIX_UPGRADE_GUID "62d22168-cbc0-47f7-8875-e4e3ac80552c")
-        set(CPACK_WIX_CMAKE_PACKAGE_REGISTRY ON)
-        set(CPACK_PACKAGE_INSTALL_DIRECTORY "MariaDB/ColumnStore Remote Import")
-        include(CPack)
-    ENDIF(REMOTE_CPIMPORT)
-endif(WIN32)
-
-if (TEST_RUNNER)
-  include(CTest)
-endif (TEST_RUNNER)
-
 MESSAGE(STATUS "-----------------------------------------------")
 MESSAGE(STATUS "CMAKE_INSTALL_PREFIX = ${CMAKE_INSTALL_PREFIX}")
-MESSAGE(STATUS "CMAKE_BUILD_TYPE = ${CMAKE_BUILD_TYPE}")
-MESSAGE(STATUS "TEST_RUNNER = ${TEST_RUNNER}")
-MESSAGE(STATUS "BACKUPRESTORE = ${BACKUPRESTORE}")
-MESSAGE(STATUS "MONITORING = ${MONITORING}")
-MESSAGE(STATUS "REMOTE_CPIMPORT = ${REMOTE_CPIMPORT}")
 MESSAGE(STATUS "RPM = ${RPM}")
 MESSAGE(STATUS "DEB = ${DEB}")
-MESSAGE(STATUS "Change a values with: cmake -D<Variable>=<Value>")
+MESSAGE(STATUS "Change a value with: cmake -D<Variable>=<Value>")
 MESSAGE(STATUS "------------------------------------------------")
 MESSAGE(STATUS)
 

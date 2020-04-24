@@ -1,1 +1,0 @@
-CREATE TABLE IF NOT EXISTS mcsimport_test_mapping_explicit_6 (id bigint unsigned, a int, b int) engine=columnstore

@@ -1,6 +1,0 @@
-load/input.csv
-load/expected.csv
-load_2/input.csv
-load_2/expected.csv
-alt_columnstore_con/Columnstore.xml
-*.pyc
