@@ -1,8 +1,0 @@
-- column: 0
-  target: id
-- column: 2
-  target: b
-- column: 5
-  target: 3
-- column: 3
-  target: a
