@@ -19,13 +19,26 @@ STATUS=$($MCS_DIR/bin/mcsadmin getSystemStatus | tail -n +9  | sed '/^$/d' )
 SYSTEM_STATUS=$(echo "$STATUS" | grep 'System' | awk '{ printf $2; }')
 # combine module status lines
 MODULE_STATUS=$(echo "$STATUS" | grep 'Module' | awk '{ printf $2 ":" $3 " "; }')
+# set module status to 0 as default
+MODULE_STAT="0"
+
+for i in $(echo $MODULE_STATUS | sed 's/Parent\:OAM//')
+do
+	if [[ "$i" =~ "ACTIVE" ]]
+	then
+		:
+	else
+		# set module status to 1 if an error occur
+		MODULE_STAT=1
+	fi
+done
 
 # if system status is ACTIVE, then all good otherwise consider critical failure
-if [ "$SYSTEM_STATUS" == "ACTIVE" ]
+if [ "$SYSTEM_STATUS" == "ACTIVE" -a "$MODULE_STAT" -eq 0 ]
 then
-  echo "OK - system: $SYSTEM_STATUS, modules: $MODULE_STATUS"
-  exit 0
+	echo "OK - system: $SYSTEM_STATUS, modules: $MODULE_STATUS"
+  	exit 0
 else
-  echo "CRITICAL - system: $SYSTEM_STATUS, modules: $MODULE_STATUS"
-  exit 2
+	echo "CRITICAL - system: $SYSTEM_STATUS, modules: $MODULE_STATUS"
+	exit 2
 fi
