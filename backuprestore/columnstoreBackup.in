@@ -880,10 +880,10 @@ executeRsync $DRY_RUN --link-dest=../backup.1/$backupCnfDir $REMOTE_USER@$PM1:@M
 suspendDBWrites () {
 if [ "$DRY_RUN" = false ]; then
     if [ "$VERBOSE" = true ]; then
-        ssh $REMOTE_USER@$PM1 mcsadmin suspendDatabaseWrites y
+        ssh $REMOTE_USER@$PM1 columnstoreDBWrite -c suspend
     else
         printLog "Suspend DB Writes"
-        ssh $REMOTE_USER@$PM1 mcsadmin suspendDatabaseWrites y > /dev/null
+        ssh $REMOTE_USER@$PM1 columnstoreDBWrite -c suspend > /dev/null
     fi
 fi
 }
@@ -895,10 +895,10 @@ fi
 resumeDBWrites () {
 if [ "$DRY_RUN" = false ]; then
     if [ "$VERBOSE" = true ]; then
-        ssh $REMOTE_USER@$PM1 mcsadmin resumeDatabaseWrites y
+        ssh $REMOTE_USER@$PM1 columnstoreDBWrite -c resume
     else
         printLog "Resume DB Writes"
-        ssh $REMOTE_USER@$PM1 mcsadmin resumeDatabaseWrites y > /dev/null
+        ssh $REMOTE_USER@$PM1 columnstoreDBWrite -c resume > /dev/null
     fi
 fi    
 }
